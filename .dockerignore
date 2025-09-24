@@ -1,0 +1,16 @@
+# Git files
+.git
+.gitignore
+
+# GitHub files
+.github
+
+# Documentation
+README.md
+
+# License
+LICENSE
+
+# Temporary files
+*.tmp
+*.log
