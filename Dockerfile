@@ -12,16 +12,5 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Set up the ROS environment
-RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
-
-# Create a non-root user for better security practices
-RUN useradd -ms /bin/bash ros && \
-    echo "source /opt/ros/jazzy/setup.bash" >> /home/ros/.bashrc
-
-# Switch to the ros user
-USER ros
-WORKDIR /home/ros
-
 # Set the default command
 CMD ["bash"]
