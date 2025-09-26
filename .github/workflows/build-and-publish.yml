@@ -1,15 +1,7 @@
 name: Build and Publish Docker Image
 
 on:
-  # Run nightly at 2 AM UTC
-  schedule:
-    - cron: '0 2 * * *'
-  
-  # Also run on push to main branch for testing
-  push:
-    branches: [ main ]
-  
-  # Allow manual trigger
+  # Only run when explicitly triggered from the Actions tab
   workflow_dispatch:
 
 env:
@@ -43,7 +35,6 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=schedule,pattern=nightly
           type=ref,event=branch
           type=ref,event=pr
           type=raw,value=latest,enable={{is_default_branch}}
