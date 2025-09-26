@@ -1,13 +1,12 @@
 # jazzy-desktop-full
 
-This repository contains a Docker image based on the official ROS Jazzy image with the `ros-jazzy-desktop-full` meta package installed. The image is automatically built and published nightly to GitHub Container Registry.
+This repository contains a Docker image based on the official ROS Jazzy image with the `ros-jazzy-desktop-full` meta package installed.
 
 ## Features
 
 - Based on official ROS Jazzy Docker image
 - Includes ROS Jazzy Desktop-Full meta package
 - Multi-architecture support (amd64, arm64)
-- Automated nightly builds via GitHub Actions
 
 ## Usage
 
@@ -37,7 +36,6 @@ docker run -it --rm --network host \
 ### Available tags
 
 - `latest` - Latest build from main branch
-- `nightly` - Nightly automated builds
 - `main` - Latest build from main branch
 
 ## Building locally
@@ -50,9 +48,6 @@ docker build -t jazzy-desktop-full .
 
 ## Automated builds
 
-The Docker image is automatically built and published:
-- Every night at 2 AM UTC
-- On every push to the main branch
-- Can be manually triggered via GitHub Actions
+The Docker image build and publish can be manually triggered via GitHub Actions.
 
 The image is published to GitHub Container Registry at `ghcr.io/mbloechli/jazzy-desktop-full`.
