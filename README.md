@@ -247,7 +247,7 @@ secrets are set, so `docker.io` pulls are rate-limited per account instead of pe
   (`dev`, `runtime`, `dev,runtime` for both sharing one compile, or `ci` for one architecture)
   for one distro. It returns the ci image (`target: ci`) or the release image (a `version`) as
   its `image` output, and with `dev,runtime` the release dev image as `dev_image`. Private
-  repositories need the `GH_PAT` secret.
+  repositories need the `CI_PAT` secret.
 - [`reusable_release_image.yml`](.github/workflows/reusable_release_image.yml): see
   [Releases of workspace images](#releases-of-workspace-images).
 - [`actions/build-image`](actions/build-image/action.yml): the build step of

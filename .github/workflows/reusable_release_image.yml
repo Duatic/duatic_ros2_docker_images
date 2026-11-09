@@ -43,7 +43,7 @@ on:
         default: "ubuntu-24.04-arm"
         type: string
     secrets:
-      GH_PAT:
+      CI_PAT:
         description: "GitHub token used by vcs import to clone private repositories"
         required: false
       DOCKERHUB_USERNAME:
@@ -72,7 +72,7 @@ jobs:
       runner: ${{ inputs.runner }}
       runner_arm64: ${{ inputs.runner_arm64 }}
     secrets:
-      GH_PAT: ${{ secrets.GH_PAT }}
+      CI_PAT: ${{ secrets.CI_PAT }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
