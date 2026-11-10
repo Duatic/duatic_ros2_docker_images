@@ -2,6 +2,10 @@
 Changelog
 ^^^^^^^^^
 
+1.5.1 (2026-11-10)
+------------------
+* fix(deps): keep the underlay visible to rosdep under sudo (#41)
+
 1.5.0 (2026-11-10)
 ------------------
 * feat(prune): share image pruning as a composite action (#39)
