@@ -107,9 +107,8 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # Delete the images nothing needs any more (scripts/prune_images.sh): ci images built before
-  # today, whose key holds an earlier day, and nightly dev and runtime images older than 7 days.
-  # Release images and the moving :<distro> and :<distro>-nightly tags stay.
+  # Delete the nightly dev and runtime images nothing needs any more (actions/prune-images). The
+  # caller's scheduled CI (ci-workflows' ci_orchestrator.yml) prunes its ci images.
   prune:
     name: Prune images
     needs: build
@@ -135,34 +134,14 @@ jobs:
           repository: ${{ steps.self.outputs.repo }}
           ref: ${{ steps.self.outputs.ref }}
           path: factory
-          sparse-checkout: scripts
-
-      # Reading a multi-arch tag's per-architecture images needs a login for private packages.
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          sparse-checkout: |
+            scripts
+            actions/prune-images
 
       - name: Delete old images
-        env:
-          GH_TOKEN: ${{ github.token }}
-          OWNER: ${{ github.repository_owner }}
-          REPO: ${{ github.event.repository.name }}
-        run: |
-          set -euo pipefail
-          name=${REPO#duatic_}
-          today=$(TZ=Europe/Zurich date -d 'today 00:00' +%s)
-          week=$(date -d '7 days ago' +%s)
-          status=0
-          ./factory/scripts/prune_images.sh --package "${name}-ci" --before "$today" --any-tag \
-            || status=1
-          for package in "$name" "${name}-dev"; do
-            ./factory/scripts/prune_images.sh --package "$package" --before "$week" --nightly \
-              || status=1
-          done
-          exit "$status"
+        uses: ./factory/actions/prune-images
+        with:
+          targets: dev runtime
 
   # Coalesces every leg's badge artifact into a single commit on the image-badges branch.
   badges:
