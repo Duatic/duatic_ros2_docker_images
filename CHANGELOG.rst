@@ -2,6 +2,10 @@
 Changelog
 ^^^^^^^^^
 
+1.4.0 (2026-11-09)
+------------------
+* fix(factory): read the private-repo token from CI_PAT (#37)
+
 1.3.1 (2026-11-06)
 ------------------
 * fix(factory): key ci images on file content (#34)
