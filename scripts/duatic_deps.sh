@@ -92,7 +92,8 @@ fi
 : "${ROS_DISTRO:?ROS_DISTRO not set}"
 
 sudo apt-get update
-sudo duatic-rosdep-install "$SRC" "$ROS_DISTRO"
+# rosdep --ignore-src skips packages on AMENT_PREFIX_PATH (the underlay), which sudo would drop.
+sudo --preserve-env=AMENT_PREFIX_PATH duatic-rosdep-install "$SRC" "$ROS_DISTRO"
 sudo duatic-install-extra-deps "$SRC" --lenient
 # No apt-get clean: a container may mount apt lists and downloaded packages as a cache.
 
