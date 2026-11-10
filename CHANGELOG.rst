@@ -2,6 +2,10 @@
 Changelog
 ^^^^^^^^^
 
+1.5.0 (2026-11-10)
+------------------
+* feat(prune): share image pruning as a composite action (#39)
+
 1.4.0 (2026-11-09)
 ------------------
 * fix(factory): read the private-repo token from CI_PAT (#37)
