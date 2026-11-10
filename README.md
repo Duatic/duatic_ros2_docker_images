@@ -157,10 +157,12 @@ Tags:
   released runtime, and moves `:<distro>` to it until the next nightly.
 - `ci`: `:<distro>-<arch>-<key>`, one architecture each.
 
-The nightly deletes what nothing needs any more (`scripts/prune_images.sh`): `ci` images built
-before today, whose key holds an earlier day, and `dev` and `runtime` images older than 7 days
-that carry only `:<distro>-YYYY-MM-DD` tags or none. Release images, the moving `:<distro>` and
-`:<distro>-nightly` tags, and the per-architecture images they point at are kept.
+[`actions/prune-images`](actions/prune-images/action.yml) deletes what nothing needs any more:
+`ci` images built before today, whose key holds an earlier day, and `dev` and `runtime` images
+older than 7 days that carry only `:<distro>-YYYY-MM-DD` tags or none. Release images, the moving
+`:<distro>` and `:<distro>-nightly` tags, and the per-architecture images they point at are kept.
+The nightly prunes `dev` and `runtime`, and a repository's scheduled CI (ci-workflows'
+`ci_orchestrator.yml`) prunes `ci`.
 
 ### What makes up a workspace
 
@@ -255,6 +257,9 @@ secrets are set, so `docker.io` pulls are rate-limited per account instead of pe
   steps. ci-workflows' `reusable_ci.yml` builds the ci image and tests on it in one job this
   way. Called at a release (`@v1`), it builds on the base images of that release, like the
   workflows.
+- [`actions/prune-images`](actions/prune-images/action.yml): deletes the calling repository's
+  images that nothing needs any more, of the `targets` given (`ci`, `dev`, `runtime`), with the
+  job's token. Needs `packages: write`. ci-workflows' `ci_orchestrator.yml` prunes `ci` with it.
 
 Every workflow takes `architectures` (a JSON list, default `'["amd64","arm64"]'`), `runner`
 (the amd64 builds and every other job, default `ubuntu-latest`) and `runner_arm64` (default

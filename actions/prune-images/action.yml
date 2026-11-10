@@ -1,0 +1,49 @@
+name: Prune images
+description: >-
+  Delete the calling repository's published images that nothing needs any more
+  (scripts/prune_images.sh): ci images built before today, whose key holds an earlier day, and
+  nightly dev and runtime images older than 7 days. Release images and the moving :<distro> and
+  :<distro>-nightly tags stay.
+
+inputs:
+  targets:
+    description: "Whitespace-separated image targets to prune, of ci, dev and runtime"
+    required: true
+  token:
+    description: "Token with packages: write on the calling repository's packages"
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    # Reading a multi-arch tag's per-architecture images needs a login for private packages.
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+
+    - name: Delete old images
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        OWNER: ${{ github.repository_owner }}
+        REPO: ${{ github.event.repository.name }}
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        set -euo pipefail
+        prune="${GITHUB_ACTION_PATH}/../../scripts/prune_images.sh"
+        name=${REPO#duatic_}
+        today=$(TZ=Europe/Zurich date -d 'today 00:00' +%s)
+        week=$(date -d '7 days ago' +%s)
+        status=0
+        for target in $TARGETS; do
+            case "$target" in
+                ci) "$prune" --package "${name}-ci" --before "$today" --any-tag || status=1 ;;
+                dev) "$prune" --package "${name}-dev" --before "$week" --nightly || status=1 ;;
+                runtime) "$prune" --package "$name" --before "$week" --nightly || status=1 ;;
+                *) echo "::error::unknown target '${target}', expected ci, dev or runtime"; status=1 ;;
+            esac
+        done
+        exit "$status"
