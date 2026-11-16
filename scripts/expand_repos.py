@@ -71,30 +71,40 @@ RETRY_DELAY_S = 5
 
 
 def normalized_url(url):
-    """The url without case, a trailing slash or .git, so spellings of one repository compare equal."""
+    """Normalize a repository url so different spellings of one repository compare equal.
+
+    :param url: the url as a repos file spells it.
+    :returns: the url lowercased, without a trailing slash or ``.git``.
+    """
     url = url.rstrip("/").lower()
     return url[: -len(".git")] if url.endswith(".git") else url
 
 
 def spec(entry):
-    """What two lists naming the same repository key have to agree on."""
+    """Reduce a repos entry to what two lists naming the same repository key have to agree on.
+
+    :param entry: one entry of a repositories mapping.
+    :returns: ``(type, url, version)``, the url normalized and the version a string.
+    """
     return entry.get("type"), normalized_url(entry.get("url", "")), str(entry.get("version", ""))
 
 
 def repositories(text):
-    """The repositories mapping of a repos file's text."""
+    """Parse the repositories mapping out of a repos file.
+
+    :param text: the repos file content.
+    :returns: the repositories mapping, empty when the file names none.
+    """
     return (yaml.safe_load(text) or {}).get("repositories") or {}
 
 
 def package_deps(text, where):
-    """The package a package.xml declares, and every package its *depend tags name.
+    """Read the package a package.xml declares, and every package its ``*depend`` tags name.
 
-    Args:
-        text: the package.xml content.
-        where: names the file in the error when it cannot be read.
-
-    Returns:
-        (name, deps), deps a set of package names.
+    :param text: the package.xml content.
+    :param where: names the file in the error when it cannot be read.
+    :returns: ``(name, deps)``, deps a set of package names.
+    :raises SystemExit: when the package name cannot be read.
     """
     try:
         manifest = ET.fromstring(text)
@@ -105,16 +115,15 @@ def package_deps(text, where):
 
 
 def resolve(url, version):
-    """The commit a git repository's version names, its repos.list text and its packages there.
+    """Resolve a git repository's version to a commit and read its repos.list and packages there.
 
-    Args:
-        url: the repository to fetch from.
-        version: a branch, tag or commit.
-
-    Returns:
-        (commit, text, packages): text None when the repository carries no repos.list, packages
-        every package.xml in the tree as its package name mapped to (directory, deps), the
-        directory relative to the repository root and deps the packages it depends on.
+    :param url: the repository to fetch from.
+    :param version: a branch, tag or commit.
+    :returns: ``(commit, text, packages)``: text ``None`` when the repository carries no
+        repos.list, packages every package.xml in the tree as its package name mapped to
+        ``(directory, deps)``, the directory relative to the repository root and deps the
+        packages it depends on.
+    :raises SystemExit: when a git command fails or a package.xml cannot be read.
     """
     with tempfile.TemporaryDirectory() as tmp:
 
@@ -177,14 +186,13 @@ def resolve(url, version):
 def expand(repos, root_url):
     """Merge repos with the lists its git repositories carry, pinning each git repository.
 
-    Args:
-        repos: the repositories mapping of the root's repos.list.
-        root_url: the root repository's normalized url, left out wherever a list names it.
-
-    Returns:
-        (merged, pinned, provides): the repositories at the versions their lists name, the same
-        with every git repository's version replaced by its commit, and per git repository the
-        packages it carries (see resolve).
+    :param repos: the repositories mapping of the root's repos.list.
+    :param root_url: the root repository's normalized url, left out wherever a list names it.
+    :returns: ``(merged, pinned, provides)``: the repositories at the versions their lists name,
+        the same with every git repository's version replaced by its commit, and per git
+        repository the packages it carries (see :func:`resolve`).
+    :raises SystemExit: when two lists disagree on a key, one url appears under two keys, or
+        resolving a repository fails.
     """
     queue = deque([(NESTED, repos)])
     merged, pinned, provides, named_by, key_of_url = {}, {}, {}, {}, {}
@@ -221,13 +229,11 @@ def expand(repos, root_url):
 
 
 def local_deps(directory):
-    """Every package the package.xml files of a local checkout depend on.
+    """Collect every package the package.xml files of a local checkout depend on.
 
-    Args:
-        directory: the checkout, searched at any depth.
-
-    Returns:
-        The set of package names.
+    :param directory: the checkout, searched at any depth.
+    :returns: the set of package names.
+    :raises SystemExit: when a package.xml cannot be read.
     """
     deps = set()
     for dirpath, _, filenames in os.walk(directory):
@@ -239,15 +245,14 @@ def local_deps(directory):
 
 
 def needed(deps, provides):
-    """The packages deps reach, directly or through the dependencies of the packages reached.
+    """Find the packages deps reach, directly or through the dependencies of the packages reached.
 
-    Args:
-        deps: package names to start from.
-        provides: per repository key, its packages as resolve returns them.
+    A package no repository carries is left to rosdep.
 
-    Returns:
-        Each package reached mapped to the key of the repository carrying it. A package no
-        repository carries is left to rosdep.
+    :param deps: package names to start from.
+    :param provides: per repository key, its packages as :func:`resolve` returns them.
+    :returns: each package reached mapped to the key of the repository carrying it.
+    :raises SystemExit: when two repositories carry the same package.
     """
     owner = {}
     for key, packages in provides.items():
@@ -267,11 +272,10 @@ def needed(deps, provides):
 def write_unused(path, found, provides):
     """Write the directories of the packages not found, in the repositories found reaches.
 
-    Args:
-        path: the file to write, one directory per line, each a repository key joined with the
-            package's directory in it.
-        found: the packages built, as needed returns them.
-        provides: per repository key, its packages as resolve returns them.
+    :param path: the file to write, overwritten if it exists: one directory per line, each a
+        repository key joined with the package's directory in it.
+    :param found: the packages built, as :func:`needed` returns them.
+    :param provides: per repository key, its packages as :func:`resolve` returns them.
     """
     unused = sorted(
         os.path.join(key, directory)
@@ -284,13 +288,20 @@ def write_unused(path, found, provides):
 
 
 def write(path, repos):
-    """Write a repositories mapping as a repos file."""
+    """Write a repositories mapping as a repos file.
+
+    :param path: the file to write, overwritten if it exists.
+    :param repos: the repositories mapping.
+    """
     with open(path, "w") as f:
         yaml.safe_dump({"repositories": repos}, f, sort_keys=False, default_flow_style=False)
 
 
 def main():
-    """Write the repos files and unused_packages.txt, or exit with the first conflict found."""
+    """Write the three repos files and unused_packages.txt.
+
+    :raises SystemExit: with the first conflict found.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("repos_file")
     ap.add_argument("--root", nargs=4, required=True, metavar=("NAME", "URL", "COMMIT", "BRANCH"))
