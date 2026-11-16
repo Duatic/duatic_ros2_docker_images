@@ -52,7 +52,8 @@ FROM scratch AS source
 
 ############################
 # resolve: pin the repository set. duatic-expand-repos follows the repos.list of every listed
-# repository, fails when two of them pin the same repository differently, and pins each to the
+# repository, fails when two of them pin the same repository differently, keeps only the
+# repositories the root's package.xml files depend on, recursively, and pins each to the
 # commit its branch names right now. build_workspace.sh runs this stage on its own (target lock),
 # keys the ci image on the result and passes it back in as the lock context, so every later
 # stage builds exactly the commits the key names, however the branches move meanwhile.
@@ -70,9 +71,9 @@ ARG CACHEBUST=none
 COPY --chmod=755 scripts/github_auth.sh /usr/local/bin/duatic-with-github-auth
 COPY --chmod=755 scripts/expand_repos.py /usr/local/bin/duatic-expand-repos
 COPY --from=sourceslock /sources.lock.repos /tmp/sourceslock.repos
-# The wildcard makes the copy optional: a root without a repos.list builds on its own.
-COPY --from=source /repos.lis[t] /tmp/source/
-RUN --mount=type=secret,id=GIT_AUTH_TOKEN,required \
+# The whole checkout, for its repos.list and the package.xml files that pick what gets built.
+RUN --mount=type=bind,from=source,target=/tmp/source \
+    --mount=type=secret,id=GIT_AUTH_TOKEN,required \
     duatic-with-github-auth --require bash -c 'set -euo pipefail; \
     echo "cachebust: ${CACHEBUST}"; \
     : "${SOURCE_COMMIT:?build with scripts/build_workspace.sh}"; \

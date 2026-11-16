@@ -30,6 +30,11 @@ names. Two lists naming the same repository key must agree on its type, url and 
 url may not appear under two keys; either is an error that names both lists. Each git repository
 is pinned to the commit its version names right now.
 
+The merged lists declare where each package comes from. Of the repositories they name, only those
+a package.xml of the root (any depth below the directory of REPOS_FILE) depends on, directly or
+through the packages of other repositories built, are written; every other repository is left out
+of all three files. Every *depend tag counts, test and doc dependencies included.
+
 Usage:  expand_repos.py REPOS_FILE --root NAME URL COMMIT BRANCH --out DIR [--locked]
 
 Writes, ready for `vcs import`:
@@ -47,11 +52,13 @@ import argparse
 import os
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 from collections import deque
 
 import yaml
 
 NESTED = "repos.list"
+MANIFEST = "package.xml"
 
 
 def normalized_url(url):
@@ -70,15 +77,34 @@ def repositories(text):
     return (yaml.safe_load(text) or {}).get("repositories") or {}
 
 
+def package_deps(text, where):
+    """The package a package.xml declares, and every package its *depend tags name.
+
+    Args:
+        text: the package.xml content.
+        where: names the file in the error when it cannot be read.
+
+    Returns:
+        (name, deps), deps a set of package names.
+    """
+    try:
+        manifest = ET.fromstring(text)
+        name = manifest.findtext("name").strip()
+    except (ET.ParseError, AttributeError) as e:
+        raise SystemExit(f"{where}: no package name readable: {e}")
+    return name, {e.text.strip() for e in manifest if e.tag.endswith("depend") and e.text}
+
+
 def resolve(url, version):
-    """The commit a git repository's version names, and the repos.list text it carries there.
+    """The commit a git repository's version names, its repos.list text and its packages there.
 
     Args:
         url: the repository to fetch from.
         version: a branch, tag or commit.
 
     Returns:
-        (commit, text), text None when the repository carries no repos.list.
+        (commit, text, packages): text None when the repository carries no repos.list, packages
+        every package.xml in the tree as its package name mapped to the packages it depends on.
     """
     with tempfile.TemporaryDirectory() as tmp:
 
@@ -91,14 +117,27 @@ def resolve(url, version):
 
         git("init", "-q")
         git("remote", "add", "origin", url)
-        # A partial clone fetches commit and trees only; git show then downloads the one blob read.
         git("config", "remote.origin.promisor", "true")
         git("config", "remote.origin.partialclonefilter", "blob:none")
         git("fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", version)
         commit = git("rev-parse", "FETCH_HEAD").strip()
-        if not git("ls-tree", "FETCH_HEAD", NESTED).strip():
-            return commit, None
-        return commit, git("show", f"FETCH_HEAD:{NESTED}")
+        listing = git("ls-tree", "-r", "-z", "FETCH_HEAD").split("\0")[:-1]
+        objects = {
+            path: meta.split()[2] for meta, path in (entry.split("\t", 1) for entry in listing)
+        }
+        manifests = {p: o for p, o in objects.items() if os.path.basename(p) == MANIFEST}
+        wanted = [*manifests.values(), *([objects[NESTED]] if NESTED in objects else [])]
+        if wanted:
+            git(
+                "-c", "fetch.negotiationAlgorithm=noop",
+                "fetch", "-q", "--no-write-fetch-head", "origin", *wanted,
+            )
+        packages = dict(
+            package_deps(git("cat-file", "blob", o), f"{url}@{version}:{p}")
+            for p, o in manifests.items()
+        )
+        text = git("cat-file", "blob", objects[NESTED]) if NESTED in objects else None
+        return commit, text, packages
 
 
 def expand(repos, root_url):
@@ -109,11 +148,12 @@ def expand(repos, root_url):
         root_url: the root repository's normalized url, left out wherever a list names it.
 
     Returns:
-        (merged, pinned): the repositories at the versions their lists name, and the same with
-        every git repository's version replaced by its commit.
+        (merged, pinned, provides): the repositories at the versions their lists name, the same
+        with every git repository's version replaced by its commit, and per git repository the
+        packages it carries (see resolve).
     """
     queue = deque([(NESTED, repos)])
-    merged, pinned, named_by, key_of_url = {}, {}, {}, {}
+    merged, pinned, provides, named_by, key_of_url = {}, {}, {}, {}, {}
     while queue:
         origin, repos = queue.popleft()
         for key, entry in repos.items():
@@ -138,11 +178,56 @@ def expand(repos, root_url):
             if entry.get("type") != "git":
                 pinned[key] = entry
                 continue
-            commit, text = resolve(entry["url"], str(entry.get("version") or "HEAD"))
+            version = str(entry.get("version") or "HEAD")
+            commit, text, provides[key] = resolve(entry["url"], version)
             pinned[key] = {**entry, "version": commit}
             if text is not None:
                 queue.append((f"{key}/{NESTED}", repositories(text)))
-    return merged, pinned
+    return merged, pinned, provides
+
+
+def local_deps(directory):
+    """Every package the package.xml files of a local checkout depend on.
+
+    Args:
+        directory: the checkout, searched at any depth.
+
+    Returns:
+        The set of package names.
+    """
+    deps = set()
+    for dirpath, _, filenames in os.walk(directory):
+        if MANIFEST in filenames:
+            path = os.path.join(dirpath, MANIFEST)
+            with open(path) as f:
+                deps |= package_deps(f.read(), path)[1]
+    return deps
+
+
+def needed(deps, provides):
+    """The repositories deps reach, directly or through the dependencies of their packages.
+
+    Args:
+        deps: package names to start from.
+        provides: per repository key, its packages mapped to their dependencies (see expand).
+
+    Returns:
+        The set of repository keys. A package no repository carries is left to rosdep.
+    """
+    owner = {}
+    for key, packages in provides.items():
+        for name in packages:
+            if name in owner:
+                raise SystemExit(f"package {name} is in both {owner[name]} and {key}")
+            owner[name] = key
+    keys, queue = set(), deque(deps)
+    while queue:
+        key = owner.get(queue.popleft())
+        if key is not None and key not in keys:
+            keys.add(key)
+            for requires in provides[key].values():
+                queue.extend(requires)
+    return keys
 
 
 def write(path, repos):
@@ -174,7 +259,10 @@ def main():
         write(os.path.join(args.out, "sources.repos"), repos)
         return
 
-    merged, pinned = expand(repos, root_url)
+    merged, pinned, provides = expand(repos, root_url)
+    keep = needed(local_deps(os.path.dirname(os.path.abspath(args.repos_file))), provides)
+    merged = {k: e for k, e in merged.items() if k in keep}
+    pinned = {k: e for k, e in pinned.items() if k in keep}
     root = {"type": "git", "url": url}
     write(os.path.join(args.out, "upstream.repos"), pinned)
     write(

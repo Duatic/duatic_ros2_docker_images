@@ -82,7 +82,8 @@ Targets:
           target.
 
 The repository set is resolved first: every branch repos.list names, recursively, is pinned to
-its commit (scripts/expand_repos.py). The ci image is keyed on everything it is built from:
+its commit, and only the repositories the checkout's package.xml files depend on, recursively,
+are kept (scripts/expand_repos.py). The ci image is keyed on everything it is built from:
 the cachebust day, the factory files it reads, the ros2-base digest, the distro, the
 architecture, the pinned upstream repositories and the checkout's package.xml, Aptfile and
 requirements.txt files. When an image with that key is published, every target reuses it
