@@ -158,20 +158,19 @@ RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
     duatic-with-github-auth duatic-install-extra-deps src --lenient && \
     apt-get clean && rm -rf /var/lib/apt/lists/* src
 
-# Colcon build. Vendor packages fetch their upstream from github.com at build time (CMake
+# Colcon build, keeping only the compiled install/. The sources are bind-mounted so no layer
+# carries them. Vendor packages fetch their upstream from github.com at build time (CMake
 # FetchContent/ExternalProject), which is why it goes through duatic-with-github-auth.
-COPY --from=fetch /ros2_ws/src/ ${DUATIC_WS}/src/
 RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
+    --mount=type=bind,from=fetch,source=/ros2_ws/src,target=${DUATIC_WS}/src \
     . /opt/ros/$ROS_DISTRO/setup.sh && \
     export CMAKE_PREFIX_PATH=/usr/local:$CMAKE_PREFIX_PATH \
            MAKEFLAGS="-j${INNER_JOBS}" \
            CMAKE_BUILD_PARALLEL_LEVEL="${INNER_JOBS}" && \
     echo "build limits: workers=${PARALLEL_WORKERS} inner=${INNER_JOBS} nproc=$(nproc) MAKEFLAGS=${MAKEFLAGS}" && \
     duatic-with-github-auth colcon build --continue-on-error --mixin release ccache \
-        --parallel-workers "${PARALLEL_WORKERS}"
-
-# Keep only the compiled install/.
-RUN rm -rf ${DUATIC_WS}/build ${DUATIC_WS}/log ${DUATIC_WS}/src && mkdir -p /etc/duatic
+        --parallel-workers "${PARALLEL_WORKERS}" && \
+    rm -rf build log
 
 # The pin of the upstream repositories compiled here; workspace replaces it with the full pin.
 COPY --from=lock /upstream.repos /etc/duatic/sources.lock.repos
@@ -190,8 +189,8 @@ ARG SOURCE_REPO
 ARG PARALLEL_WORKERS=4
 ARG INNER_JOBS=1
 
-COPY --from=sourcetree /src/ ${DUATIC_WS}/src/${SOURCE_REPO}/
 RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
+    --mount=type=bind,from=sourcetree,source=/src,target=${DUATIC_WS}/src/${SOURCE_REPO} \
     . /opt/ros/$ROS_DISTRO/setup.sh && \
     if [ -f install/setup.sh ]; then . install/setup.sh; fi && \
     export CMAKE_PREFIX_PATH=/usr/local:$CMAKE_PREFIX_PATH \
@@ -199,7 +198,7 @@ RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
            CMAKE_BUILD_PARALLEL_LEVEL="${INNER_JOBS}" && \
     duatic-with-github-auth colcon build --continue-on-error --mixin release ccache \
         --parallel-workers "${PARALLEL_WORKERS}" && \
-    rm -rf build log src
+    rm -rf build log
 
 # Exact source pin this workspace was built from (see resolve above), carried into runtime (via
 # its FROM chain) and dev (copied again below, since a lean dev never goes through this
