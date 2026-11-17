@@ -146,14 +146,19 @@ cc() {
 }
 
 # `ros2 launch` goes through duatic-launch, which also copies the output to the host
-# journal. `command ros2 launch` runs it directly.
-ros2() {
-    if [ "${1:-}" = "launch" ]; then
-        shift
-        duatic-launch "$@"
-    else
-        command ros2 "$@"
-    fi
-}
+# journal. `command ros2 launch` runs it directly. Interactive shells only, so a script
+# or a `bash -lc` command keeps the plain ros2.
+case $- in
+    *i*)
+        ros2() {
+            if [ "${1:-}" = "launch" ] && [ -S /dev/log ]; then
+                shift
+                duatic-launch "$@"
+            else
+                command ros2 "$@"
+            fi
+        }
+        ;;
+esac
 
 return 0

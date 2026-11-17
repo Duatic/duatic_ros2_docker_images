@@ -100,6 +100,11 @@ RUN git config --system --add safe.directory '*'
 COPY --chmod=755 scripts/rosdep_install.sh /usr/local/bin/duatic-rosdep-install
 COPY --chmod=755 scripts/install_extra_deps.sh /usr/local/bin/duatic-install-extra-deps
 
+# `ros2 launch` and `ros2 run` with their output copied to the host journal. One script
+# under two names, see its header.
+COPY --chmod=755 config/bin/duatic-launch /usr/local/bin/
+RUN ln -s duatic-launch /usr/local/bin/duatic-run
+
 ############################
 # dev: base + developer tooling + dev-container shell environment.
 ############################
@@ -155,11 +160,8 @@ COPY --chmod=440 config/sudoers-duatic-caps /etc/sudoers.d/duatic-caps
 #   duatic-sync-groups  make the host user a member of every device-owning group in /dev
 #   duatic-exec         the one way anything enters this container as the host user
 #   duatic-shell        $SHELL / login shell, reaches duatic-exec via sudo
-#   duatic-launch       ros2 launch, with its output copied to the host journal
-#   duatic-run          the same for ros2 run
 COPY --chmod=755 config/bin/duatic-sync-groups config/bin/duatic-exec config/bin/duatic-shell \
-    config/bin/duatic-launch /usr/local/bin/
-RUN ln -s duatic-launch /usr/local/bin/duatic-run
+    /usr/local/bin/
 RUN echo /usr/local/bin/duatic-shell >>/etc/shells
 
 # Shell environment: ROS overlay chain + venv, cb/cc build helpers, prompt, history.

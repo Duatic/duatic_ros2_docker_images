@@ -31,8 +31,6 @@
 #   journalctl -t duatic-launch -p err
 # lists the errors. Without that socket the command runs unchanged.
 
-set -o pipefail
-
 name="${0##*/}"
 case "$name" in
     duatic-launch) cmd=(ros2 launch) ;;
@@ -61,13 +59,10 @@ s/\x1b\[[0-9;]*m//g
 s/^/<6>/
 '
 
-# Ctrl-C reaches every process here. Only the ros2 command may act on it: the others have
-# to stay up to carry its shutdown output.
-"${cmd[@]}" "$@" 2>&1 |
-    tee -i >(
-        trap '' INT
-        sed -u -E "$PRIORITY_PREFIX" | logger --prio-prefix -t "$name"
-    )
-status=$?
-wait
-exit "$status"
+# The command replaces this script, so signals and the exit status are its own. The copy
+# ignores those signals, to stay up and carry the shutdown output, and ends when the
+# command closes its output.
+exec "${cmd[@]}" "$@" > >(
+    trap '' INT TERM HUP
+    exec tee >(sed -u -E "$PRIORITY_PREFIX" | logger --prio-prefix -t "$name")
+) 2>&1
