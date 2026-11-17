@@ -48,6 +48,7 @@ To open further shells in a running container as the same user, use
 | `duatic-doctor` | Diagnose capabilities, device groups, `/run/udev`, DDS config and unresolved dependencies. |
 | `duatic-exec` | Enter the container as the host user with device groups synced and `CAP_NET_RAW`. |
 | `duatic-launch <args>` | `ros2 launch <args>`, with its output also copied to the host journal when the host's `/run/systemd/journal/dev-log` is mounted at `/dev/log`. Lines carry the priority of their ROS severity: `journalctl -t duatic-launch -p err` on the host. In an interactive shell `ros2 launch` runs this; `command ros2 launch` runs the plain one. |
+| `duatic-run <args>` | `ros2 run <args>`, copied to the journal the same way under the tag `duatic-run`. The node's output is line buffered, so it still appears as it is written. |
 | `duatic-shell` | The container's `$SHELL`. Reaches `duatic-exec` through `sudo` for shells that start without it, such as VSCode terminals. |
 
 The ROS environment is sourced in this order, last wins: `/opt/ros/<distro>`, then

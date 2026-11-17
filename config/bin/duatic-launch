@@ -22,18 +22,32 @@
 # NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-# duatic-launch: `ros2 launch`, with its output also copied to the host journal.
+# duatic-launch and duatic-run: `ros2 launch` and `ros2 run`, with their output also copied
+# to the host journal. One script, installed under both names: the name picks the verb.
 #
-# Takes the arguments of `ros2 launch`. Each line is sent to the syslog socket at /dev/log
-# under the tag duatic-launch, with the priority of its ROS severity, so on the host
+# Takes the arguments of the ros2 verb. Each line is sent to the syslog socket at /dev/log
+# under the tag duatic-launch or duatic-run, with the priority of its ROS severity, so on
+# the host
 #   journalctl -t duatic-launch -p err
-# lists the errors. Without that socket the launch runs unchanged.
+# lists the errors. Without that socket the command runs unchanged.
 
 set -o pipefail
 
+name="${0##*/}"
+case "$name" in
+    duatic-launch) cmd=(ros2 launch) ;;
+    duatic-run)
+        # A node started by `ros2 run` writes to this pipe itself, and would hold its
+        # output back in a block buffer.
+        export PYTHONUNBUFFERED=1
+        cmd=(stdbuf -oL ros2 run)
+        ;;
+    *) echo "$name: expected to be called as duatic-launch or duatic-run" >&2; exit 2 ;;
+esac
+
 if [ ! -S /dev/log ]; then
-    echo "duatic-launch: no /dev/log here, the output is not copied to the journal" >&2
-    exec ros2 launch "$@"
+    echo "$name: no /dev/log here, the output is not copied to the journal" >&2
+    exec "${cmd[@]}" "$@"
 fi
 
 # The syslog priority of a line, from the severity ROS prints at its start or after the
@@ -47,12 +61,12 @@ s/\x1b\[[0-9;]*m//g
 s/^/<6>/
 '
 
-# Ctrl-C reaches every process here. Only the launch may act on it: the others have to
-# stay up to carry its shutdown output.
-command ros2 launch "$@" 2>&1 |
+# Ctrl-C reaches every process here. Only the ros2 command may act on it: the others have
+# to stay up to carry its shutdown output.
+"${cmd[@]}" "$@" 2>&1 |
     tee -i >(
         trap '' INT
-        sed -u -E "$PRIORITY_PREFIX" | logger --prio-prefix -t duatic-launch
+        sed -u -E "$PRIORITY_PREFIX" | logger --prio-prefix -t "$name"
     )
 status=$?
 wait
