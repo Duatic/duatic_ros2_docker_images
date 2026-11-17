@@ -24,19 +24,20 @@
 
 """Resolve the repository set a workspace is built from, every git repository pinned to a commit.
 
-REPOS_FILE is the root repository's repos.list (missing: the root builds on its own). It is merged
-with every repos.list its git repositories carry, recursively, each read at the version that entry
-names. Two lists naming the same repository key must agree on its type, url and version, and one
-url may not appear under two keys; either is an error that names both lists. Each git repository
-is pinned to the commit its version names right now.
+Every repository, the root included, lists the repositories it builds on in repos.<DISTRO>.list,
+or in repos.list when it has no list for DISTRO (neither: it builds on nothing). The root's list,
+read from CHECKOUT, is merged with the list every git repository it names carries, recursively,
+each read at the version that entry names. Two lists naming the same repository key must agree
+on its type, url and version, and one url may not appear under two keys; either is an error that
+names both lists. Each git repository is pinned to the commit its version names right now.
 
 The merged lists declare where each package comes from. Only the packages a package.xml of the
 root (any depth below CHECKOUT) depends on, directly or through other packages built, are built,
 and only the repositories carrying one of them are written; every other repository is left out of
 all three repos files. Every *depend tag counts, test and doc dependencies included.
 
-Usage:  expand_repos.py REPOS_FILE --root NAME URL COMMIT BRANCH --checkout CHECKOUT --out DIR
-                        [--locked]
+Usage:  expand_repos.py --root NAME URL COMMIT BRANCH --checkout CHECKOUT --distro DISTRO
+                        --out DIR [--locked LOCK_FILE]
 
 Writes, ready for `vcs import`:
   DIR/upstream.repos         the pinned repositories, without the root: what the build imports
@@ -46,9 +47,9 @@ Writes, ready for `vcs import`:
   DIR/unused_packages.txt    one line per package of upstream.repos that is not built: its
                              directory relative to the directory upstream.repos is imported into
 
---locked takes REPOS_FILE as the sources.lock.repos of an earlier build, to reproduce it: nothing
-is expanded or pinned again, the root (matched by URL) is left out of upstream.repos, and both
-manifests repeat REPOS_FILE.
+--locked takes LOCK_FILE, the sources.lock.repos of an earlier build, to reproduce it: nothing is
+expanded or pinned again, the root (matched by URL) is left out of upstream.repos, and both
+manifests repeat LOCK_FILE.
 """
 
 import argparse
@@ -62,7 +63,6 @@ from collections import deque
 
 import yaml
 
-NESTED = "repos.list"
 MANIFEST = "package.xml"
 UNUSED = "unused_packages.txt"
 # Tries per git command that reaches the network, and the wait before the first retry, in seconds.
@@ -114,13 +114,24 @@ def package_deps(text, where):
     return name, {e.text.strip() for e in manifest if e.tag.endswith("depend") and e.text}
 
 
-def resolve(url, version):
-    """Resolve a git repository's version to a commit and read its repos.list and packages there.
+def list_names(distro):
+    """Name the files a repository may list its repositories in, in the order they are tried.
+
+    :param distro: the ROS distro being built.
+    :returns: the distro's own list, then the list every distro shares.
+    """
+    return f"repos.{distro}.list", "repos.list"
+
+
+def resolve(url, version, lists):
+    """Resolve a git repository's version to a commit and read its repos list and packages there.
 
     :param url: the repository to fetch from.
     :param version: a branch, tag or commit.
-    :returns: ``(commit, text, packages)``: text ``None`` when the repository carries no
-        repos.list, packages every package.xml in the tree as its package name mapped to
+    :param lists: the repos list names to look for, as :func:`list_names` returns them.
+    :returns: ``(commit, listed, text, packages)``: listed the first of lists the tree carries and
+        text its content, both ``None`` when it carries none, packages every package.xml in the
+        tree as its package name mapped to
         ``(directory, deps)``, the directory relative to the repository root and deps the
         packages it depends on.
     :raises SystemExit: when a git command fails or a package.xml cannot be read.
@@ -168,7 +179,8 @@ def resolve(url, version):
             path: meta.split()[2] for meta, path in (entry.split("\t", 1) for entry in listing)
         }
         manifests = {p: o for p, o in objects.items() if os.path.basename(p) == MANIFEST}
-        wanted = [*manifests.values(), *([objects[NESTED]] if NESTED in objects else [])]
+        listed = next((name for name in lists if name in objects), None)
+        wanted = [*manifests.values(), *([objects[listed]] if listed else [])]
         if wanted:
             git(
                 "-c", "fetch.negotiationAlgorithm=noop",
@@ -179,22 +191,24 @@ def resolve(url, version):
         for path, obj in manifests.items():
             package, deps = package_deps(git("cat-file", "blob", obj), f"{url}@{version}:{path}")
             packages[package] = os.path.dirname(path), deps
-        text = git("cat-file", "blob", objects[NESTED]) if NESTED in objects else None
-        return commit, text, packages
+        text = git("cat-file", "blob", objects[listed]) if listed else None
+        return commit, listed, text, packages
 
 
-def expand(repos, root_url):
+def expand(origin, repos, root_url, lists):
     """Merge repos with the lists its git repositories carry, pinning each git repository.
 
-    :param repos: the repositories mapping of the root's repos.list.
+    :param origin: the root's list name, for error messages.
+    :param repos: the repositories mapping of the root's list.
     :param root_url: the root repository's normalized url, left out wherever a list names it.
+    :param lists: the repos list names to look for, as :func:`list_names` returns them.
     :returns: ``(merged, pinned, provides)``: the repositories at the versions their lists name,
         the same with every git repository's version replaced by its commit, and per git
         repository the packages it carries (see :func:`resolve`).
     :raises SystemExit: when two lists disagree on a key, one url appears under two keys, or
         resolving a repository fails.
     """
-    queue = deque([(NESTED, repos)])
+    queue = deque([(origin, repos)])
     merged, pinned, provides, named_by, key_of_url = {}, {}, {}, {}, {}
     while queue:
         origin, repos = queue.popleft()
@@ -221,10 +235,10 @@ def expand(repos, root_url):
                 pinned[key] = entry
                 continue
             version = str(entry.get("version") or "HEAD")
-            commit, text, provides[key] = resolve(entry["url"], version)
+            commit, listed, text, provides[key] = resolve(entry["url"], version, lists)
             pinned[key] = {**entry, "version": commit}
-            if text is not None:
-                queue.append((f"{key}/{NESTED}", repositories(text)))
+            if listed:
+                queue.append((f"{key}/{listed}", repositories(text)))
     return merged, pinned, provides
 
 
@@ -303,24 +317,22 @@ def main():
     :raises SystemExit: with the first conflict found.
     """
     ap = argparse.ArgumentParser()
-    ap.add_argument("repos_file")
     ap.add_argument("--root", nargs=4, required=True, metavar=("NAME", "URL", "COMMIT", "BRANCH"))
     ap.add_argument("--checkout", required=True)
+    ap.add_argument("--distro", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--locked", action="store_true")
+    ap.add_argument("--locked", metavar="LOCK_FILE")
     args = ap.parse_args()
     name, url, commit, branch = args.root
     root_url = normalized_url(url)
-
-    repos = {}
-    if os.path.exists(args.repos_file):
-        with open(args.repos_file) as f:
-            repos = repositories(f.read())
+    lists = list_names(args.distro)
 
     if args.locked:
+        with open(args.locked) as f:
+            repos = repositories(f.read())
         upstream = {k: e for k, e in repos.items() if normalized_url(e.get("url", "")) != root_url}
         provides = {
-            k: resolve(e["url"], str(e["version"]))[2]
+            k: resolve(e["url"], str(e["version"]), lists)[3]
             for k, e in upstream.items()
             if e.get("type") == "git"
         }
@@ -331,7 +343,12 @@ def main():
         write_unused(os.path.join(args.out, UNUSED), found, provides)
         return
 
-    merged, pinned, provides = expand(repos, root_url)
+    listed = next((n for n in lists if os.path.exists(os.path.join(args.checkout, n))), None)
+    repos = {}
+    if listed:
+        with open(os.path.join(args.checkout, listed)) as f:
+            repos = repositories(f.read())
+    merged, pinned, provides = expand(listed, repos, root_url, lists)
     found = needed(local_deps(args.checkout), provides)
     keep = set(found.values())
     merged = {k: e for k, e in merged.items() if k in keep}
