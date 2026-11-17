@@ -155,8 +155,9 @@ COPY --chmod=440 config/sudoers-duatic-caps /etc/sudoers.d/duatic-caps
 #   duatic-sync-groups  make the host user a member of every device-owning group in /dev
 #   duatic-exec         the one way anything enters this container as the host user
 #   duatic-shell        $SHELL / login shell, reaches duatic-exec via sudo
+#   duatic-launch       ros2 launch, with its output copied to the host journal
 COPY --chmod=755 config/bin/duatic-sync-groups config/bin/duatic-exec config/bin/duatic-shell \
-    /usr/local/bin/
+    config/bin/duatic-launch /usr/local/bin/
 RUN echo /usr/local/bin/duatic-shell >>/etc/shells
 
 # Shell environment: ROS overlay chain + venv, cb/cc build helpers, prompt, history.
