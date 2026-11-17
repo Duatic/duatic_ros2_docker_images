@@ -46,12 +46,17 @@ manifests repeat REPOS_FILE.
 import argparse
 import os
 import subprocess
+import sys
 import tempfile
+import time
 from collections import deque
 
 import yaml
 
 NESTED = "repos.list"
+# Tries per git command that reaches the network, and the wait before the first retry, in seconds.
+NETWORK_ATTEMPTS = 3
+RETRY_DELAY_S = 5
 
 
 def normalized_url(url):
@@ -82,23 +87,46 @@ def resolve(url, version):
     """
     with tempfile.TemporaryDirectory() as tmp:
 
-        def git(*args):
-            """Run git in the scratch repository, failing with the fetched url in the message."""
-            r = subprocess.run(["git", *args], cwd=tmp, capture_output=True, text=True)
-            if r.returncode:
-                raise SystemExit(f'{url}@{version}: git {" ".join(args)}: {r.stderr.strip()}')
-            return r.stdout
+        def git(*args: str, attempts: int = 1) -> str:
+            """Run git in the scratch repository, failing with the fetched url in the message.
+
+            A failed attempt is retried after a wait that grows by RETRY_DELAY_S each time, with a
+            note on stderr.
+
+            :param args: the git arguments.
+            :param attempts: how many times to run the command before giving up.
+            :returns: git's stdout.
+            :raises SystemExit: when the last attempt fails, with that attempt's stderr.
+            """
+            for attempt in range(1, attempts + 1):
+                r = subprocess.run(["git", *args], cwd=tmp, capture_output=True, text=True)
+                if not r.returncode:
+                    return r.stdout
+                if attempt < attempts:
+                    print(f"{url}@{version}: git {args[0]} failed, retrying", file=sys.stderr)
+                    time.sleep(attempt * RETRY_DELAY_S)
+            raise SystemExit(f'{url}@{version}: git {" ".join(args)}: {r.stderr.strip()}')
 
         git("init", "-q")
         git("remote", "add", "origin", url)
         # A partial clone fetches commit and trees only; git show then downloads the one blob read.
         git("config", "remote.origin.promisor", "true")
         git("config", "remote.origin.partialclonefilter", "blob:none")
-        git("fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", version)
+        git(
+            "fetch",
+            "-q",
+            "--depth",
+            "1",
+            "--filter=blob:none",
+            "origin",
+            version,
+            attempts=NETWORK_ATTEMPTS,
+        )
         commit = git("rev-parse", "FETCH_HEAD").strip()
+        # ls-tree reads the fetched trees locally: a missing repos.list never reaches the network.
         if not git("ls-tree", "FETCH_HEAD", NESTED).strip():
             return commit, None
-        return commit, git("show", f"FETCH_HEAD:{NESTED}")
+        return commit, git("show", f"FETCH_HEAD:{NESTED}", attempts=NETWORK_ATTEMPTS)
 
 
 def expand(repos, root_url):
