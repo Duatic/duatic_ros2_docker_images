@@ -2,6 +2,13 @@
 Changelog
 ^^^^^^^^^
 
+2.0.0 (2026-11-17)
+------------------
+* feat(factory)!: build only the repositories the root depends on (#43)
+* fix(workspace): bind-mount sources into the colcon builds (#47)
+* fix(factory): retry git fetches and tolerate a failed badge upload (#46)
+* docs(factory): convert expand_repos.py docstrings to Sphinx style (#44)
+
 1.5.1 (2026-11-10)
 ------------------
 * fix(deps): keep the underlay visible to rosdep under sudo (#41)
