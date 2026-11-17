@@ -30,6 +30,10 @@
 # the host
 #   journalctl -t duatic-launch -p err
 # lists the errors. Without that socket the command runs unchanged.
+#
+# For commands started from a shell in a running container. As a container's main command
+# the end of the output would be lost, since the copy is stopped with the container: use
+# Docker's journald log driver there.
 
 name="${0##*/}"
 case "$name" in
