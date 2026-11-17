@@ -172,6 +172,13 @@ differently, and pins every branch to the commit it points at right now
 (`scripts/expand_repos.py`). Every stage builds those commits. A repository without a
 `repos.list` builds on its own.
 
+The lists declare where each package comes from. Only the packages a `package.xml` of the
+calling repository depends on, directly or through another package built (any `*depend` tag
+counts), are built and have their dependencies installed, and only the repositories carrying one
+of them are cloned. Every other package is removed from the image's sources after the clone (the
+`sources.repos` manifest still names whole repositories), so a repository must declare every
+package it needs from another Duatic repository in its `package.xml`.
+
 Dependencies rosdep cannot resolve are declared in `requirements.txt` (pip) and `Aptfile` (apt)
 files at any depth of the workspace, which `duatic-install-extra-deps` installs after rosdep.
 Both passes in the `ci` stage are **lenient**: unresolvable rosdep keys go to
