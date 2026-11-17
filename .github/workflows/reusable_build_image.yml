@@ -279,8 +279,10 @@ jobs:
           render dev "${{ steps.merge.outputs.dev_result }}"
           render runtime "${{ steps.merge.outputs.runtime_result }}"
 
+      # The badge is cosmetic: a failed upload must not fail a merge that pushed its images.
       - name: Upload dev/runtime badge artifact
         if: ${{ always() && !inputs.version && contains(inputs.target, 'dev') && contains(inputs.target, 'runtime') }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: badge-${{ inputs.ros_distro }}
