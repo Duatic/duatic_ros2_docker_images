@@ -49,7 +49,7 @@ s/^/<6>/
 
 # Ctrl-C reaches every process here. Only the launch may act on it: the others have to
 # stay up to carry its shutdown output.
-ros2 launch "$@" 2>&1 |
+command ros2 launch "$@" 2>&1 |
     tee -i >(
         trap '' INT
         sed -u -E "$PRIORITY_PREFIX" | logger --prio-prefix -t duatic-launch
