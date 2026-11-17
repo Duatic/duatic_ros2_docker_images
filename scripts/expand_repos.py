@@ -30,18 +30,21 @@ names. Two lists naming the same repository key must agree on its type, url and 
 url may not appear under two keys; either is an error that names both lists. Each git repository
 is pinned to the commit its version names right now.
 
-The merged lists declare where each package comes from. Of the repositories they name, only those
-a package.xml of the root (any depth below the directory of REPOS_FILE) depends on, directly or
-through the packages of other repositories built, are written; every other repository is left out
-of all three files. Every *depend tag counts, test and doc dependencies included.
+The merged lists declare where each package comes from. Only the packages a package.xml of the
+root (any depth below CHECKOUT) depends on, directly or through other packages built, are built,
+and only the repositories carrying one of them are written; every other repository is left out of
+all three repos files. Every *depend tag counts, test and doc dependencies included.
 
-Usage:  expand_repos.py REPOS_FILE --root NAME URL COMMIT BRANCH --out DIR [--locked]
+Usage:  expand_repos.py REPOS_FILE --root NAME URL COMMIT BRANCH --checkout CHECKOUT --out DIR
+                        [--locked]
 
 Writes, ready for `vcs import`:
-  DIR/upstream.repos       the pinned repositories, without the root: what the build imports
-  DIR/sources.lock.repos   the root at COMMIT and the pinned repositories: the exact source pin
-  DIR/sources.repos        the root at BRANCH and every repository at the version its list names:
-                           an editable, branch-tracking manifest
+  DIR/upstream.repos         the pinned repositories, without the root: what the build imports
+  DIR/sources.lock.repos     the root at COMMIT and the pinned repositories: the exact source pin
+  DIR/sources.repos          the root at BRANCH and every repository at the version its list
+                             names: an editable, branch-tracking manifest
+  DIR/unused_packages.txt    one line per package of upstream.repos that is not built: its
+                             directory relative to the directory upstream.repos is imported into
 
 --locked takes REPOS_FILE as the sources.lock.repos of an earlier build, to reproduce it: nothing
 is expanded or pinned again, the root (matched by URL) is left out of upstream.repos, and both
@@ -59,6 +62,7 @@ import yaml
 
 NESTED = "repos.list"
 MANIFEST = "package.xml"
+UNUSED = "unused_packages.txt"
 
 
 def normalized_url(url):
@@ -104,7 +108,8 @@ def resolve(url, version):
 
     Returns:
         (commit, text, packages): text None when the repository carries no repos.list, packages
-        every package.xml in the tree as its package name mapped to the packages it depends on.
+        every package.xml in the tree as its package name mapped to (directory, deps), the
+        directory relative to the repository root and deps the packages it depends on.
     """
     with tempfile.TemporaryDirectory() as tmp:
 
@@ -132,10 +137,10 @@ def resolve(url, version):
                 "-c", "fetch.negotiationAlgorithm=noop",
                 "fetch", "-q", "--no-write-fetch-head", "origin", *wanted,
             )
-        packages = dict(
-            package_deps(git("cat-file", "blob", o), f"{url}@{version}:{p}")
-            for p, o in manifests.items()
-        )
+        packages = {}
+        for path, obj in manifests.items():
+            package, deps = package_deps(git("cat-file", "blob", obj), f"{url}@{version}:{path}")
+            packages[package] = os.path.dirname(path), deps
         text = git("cat-file", "blob", objects[NESTED]) if NESTED in objects else None
         return commit, text, packages
 
@@ -205,14 +210,15 @@ def local_deps(directory):
 
 
 def needed(deps, provides):
-    """The repositories deps reach, directly or through the dependencies of their packages.
+    """The packages deps reach, directly or through the dependencies of the packages reached.
 
     Args:
         deps: package names to start from.
-        provides: per repository key, its packages mapped to their dependencies (see expand).
+        provides: per repository key, its packages as resolve returns them.
 
     Returns:
-        The set of repository keys. A package no repository carries is left to rosdep.
+        Each package reached mapped to the key of the repository carrying it. A package no
+        repository carries is left to rosdep.
     """
     owner = {}
     for key, packages in provides.items():
@@ -220,14 +226,32 @@ def needed(deps, provides):
             if name in owner:
                 raise SystemExit(f"package {name} is in both {owner[name]} and {key}")
             owner[name] = key
-    keys, queue = set(), deque(deps)
+    found, queue = {}, deque(deps)
     while queue:
-        key = owner.get(queue.popleft())
-        if key is not None and key not in keys:
-            keys.add(key)
-            for requires in provides[key].values():
-                queue.extend(requires)
-    return keys
+        name = queue.popleft()
+        if name in owner and name not in found:
+            found[name] = owner[name]
+            queue.extend(provides[owner[name]][name][1])
+    return found
+
+
+def write_unused(path, found, provides):
+    """Write the directories of the packages not found, in the repositories found reaches.
+
+    Args:
+        path: the file to write, one directory per line, each a repository key joined with the
+            package's directory in it.
+        found: the packages built, as needed returns them.
+        provides: per repository key, its packages as resolve returns them.
+    """
+    unused = sorted(
+        os.path.join(key, directory)
+        for key in set(found.values())
+        for name, (directory, _) in provides[key].items()
+        if name not in found
+    )
+    with open(path, "w") as f:
+        f.writelines(f"{d}\n" for d in unused)
 
 
 def write(path, repos):
@@ -237,10 +261,11 @@ def write(path, repos):
 
 
 def main():
-    """Write the three repos files, or exit with the first conflict found."""
+    """Write the repos files and unused_packages.txt, or exit with the first conflict found."""
     ap = argparse.ArgumentParser()
     ap.add_argument("repos_file")
     ap.add_argument("--root", nargs=4, required=True, metavar=("NAME", "URL", "COMMIT", "BRANCH"))
+    ap.add_argument("--checkout", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--locked", action="store_true")
     args = ap.parse_args()
@@ -254,13 +279,21 @@ def main():
 
     if args.locked:
         upstream = {k: e for k, e in repos.items() if normalized_url(e.get("url", "")) != root_url}
+        provides = {
+            k: resolve(e["url"], str(e["version"]))[2]
+            for k, e in upstream.items()
+            if e.get("type") == "git"
+        }
+        found = needed(local_deps(args.checkout), provides)
         write(os.path.join(args.out, "upstream.repos"), upstream)
         write(os.path.join(args.out, "sources.lock.repos"), repos)
         write(os.path.join(args.out, "sources.repos"), repos)
+        write_unused(os.path.join(args.out, UNUSED), found, provides)
         return
 
     merged, pinned, provides = expand(repos, root_url)
-    keep = needed(local_deps(os.path.dirname(os.path.abspath(args.repos_file))), provides)
+    found = needed(local_deps(args.checkout), provides)
+    keep = set(found.values())
     merged = {k: e for k, e in merged.items() if k in keep}
     pinned = {k: e for k, e in pinned.items() if k in keep}
     root = {"type": "git", "url": url}
@@ -269,6 +302,7 @@ def main():
         os.path.join(args.out, "sources.lock.repos"), {name: {**root, "version": commit}, **pinned}
     )
     write(os.path.join(args.out, "sources.repos"), {name: {**root, "version": branch}, **merged})
+    write_unused(os.path.join(args.out, UNUSED), found, provides)
 
 
 if __name__ == "__main__":

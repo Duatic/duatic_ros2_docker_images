@@ -82,12 +82,12 @@ Targets:
           target.
 
 The repository set is resolved first: every branch repos.list names, recursively, is pinned to
-its commit, and only the repositories the checkout's package.xml files depend on, recursively,
-are kept (scripts/expand_repos.py). The ci image is keyed on everything it is built from:
-the cachebust day, the factory files it reads, the ros2-base digest, the distro, the
-architecture, the pinned upstream repositories and the checkout's package.xml, Aptfile and
-requirements.txt files. When an image with that key is published, every target reuses it
-instead of building it. A release never reuses one.
+its commit, and only the packages the checkout's package.xml files depend on, recursively, and
+the repositories carrying them are kept (scripts/expand_repos.py). The ci image is keyed on
+everything it is built from: the cachebust day, the factory files it reads, the ros2-base
+digest, the distro, the architecture, the pinned upstream repositories and the checkout's
+package.xml, Aptfile and requirements.txt files. When an image with that key is published,
+every target reuses it instead of building it. A release never reuses one.
 
 ensure_workspace_build() compiles the checkout on top of ci once per script invocation, at
 /opt/duatic/ws (Dockerfile target `workspace`), into BuildKit's cache only: it is an internal
@@ -278,6 +278,9 @@ setup_cache() {
     echo ">>> In-cluster registry mirrors active at ${HOSTIP} (base-image pulls)."
 }
 
+# The files a resolved repository set consists of (see scripts/expand_repos.py).
+LOCK_FILES=(upstream.repos sources.lock.repos sources.repos unused_packages.txt)
+
 # Pin the repository set (Dockerfile target lock, see its resolve stage), or take the one --lock
 # names, and pass it to every later build as the lock context, so they all build exactly the
 # commits the ci key names. Sets LOCK_DIR.
@@ -285,7 +288,7 @@ resolve_lock() {
     LOCK_DIR=$(mktemp -d)
     trap 'rm -rf "$LOCK_DIR"' EXIT
     if [[ -n "$LOCK_FLAG" ]]; then
-        cp "${LOCK_FLAG}"/{upstream,sources.lock,sources}.repos "$LOCK_DIR"
+        cp "${LOCK_FILES[@]/#/${LOCK_FLAG}/}" "$LOCK_DIR"
         echo ">>> Building the repository set resolved in ${LOCK_FLAG}"
         SOURCE_ARGS+=(--build-context "lock=${LOCK_DIR}")
         return 0
@@ -536,7 +539,7 @@ fi
 resolve_lock
 if [[ -n "$RESOLVE_TO_FLAG" ]]; then
     mkdir -p "$RESOLVE_TO_FLAG"
-    cp "${LOCK_DIR}"/{upstream,sources.lock,sources}.repos "$RESOLVE_TO_FLAG"
+    cp "${LOCK_FILES[@]/#/${LOCK_DIR}/}" "$RESOLVE_TO_FLAG"
     exit 0
 fi
 DIGEST_DIR="${DIGESTS_FLAG:-${LOCK_DIR}/digests}"

@@ -53,8 +53,8 @@ FROM scratch AS source
 ############################
 # resolve: pin the repository set. duatic-expand-repos follows the repos.list of every listed
 # repository, fails when two of them pin the same repository differently, keeps only the
-# repositories the root's package.xml files depend on, recursively, and pins each to the
-# commit its branch names right now. build_workspace.sh runs this stage on its own (target lock),
+# packages the root's package.xml files depend on, recursively, and the repositories carrying
+# them, and pins each to the commit its branch names right now. build_workspace.sh runs this stage on its own (target lock),
 # keys the ci image on the result and passes it back in as the lock context, so every later
 # stage builds exactly the commits the key names, however the branches move meanwhile.
 ############################
@@ -81,31 +81,36 @@ RUN --mount=type=bind,from=source,target=/tmp/source \
     root=("${SOURCE_REPO}" "https://github.com/Duatic/${SOURCE_REPO}.git" \
           "${SOURCE_COMMIT}" "${SOURCE_BRANCH:-${SOURCE_COMMIT}}"); \
     if [ -s /tmp/sourceslock.repos ]; then \
-        duatic-expand-repos /tmp/sourceslock.repos --root "${root[@]}" --out /out --locked; \
+        duatic-expand-repos /tmp/sourceslock.repos --root "${root[@]}" \
+            --checkout /tmp/source --out /out --locked; \
     else \
-        duatic-expand-repos /tmp/source/repos.list --root "${root[@]}" --out /out; \
+        duatic-expand-repos /tmp/source/repos.list --root "${root[@]}" \
+            --checkout /tmp/source --out /out; \
     fi'
 
-# lock: upstream.repos, sources.lock.repos and sources.repos at the root (see expand_repos.py).
+# lock: upstream.repos, sources.lock.repos, sources.repos and unused_packages.txt at the root
+# (see expand_repos.py).
 FROM scratch AS lock
 COPY --from=resolve /out/ /
 
 ############################
-# fetch: the pinned upstream repositories
+# fetch: the pinned upstream repositories, without the packages the root does not depend on
 ############################
 FROM ${ROS2_BASE_IMAGE} AS fetch
 ARG CACHEBUST=none
 WORKDIR ${ROS_WS}
 RUN mkdir -p src
 COPY --chmod=755 scripts/github_auth.sh /usr/local/bin/duatic-with-github-auth
-COPY --from=lock /upstream.repos /tmp/upstream.repos
+COPY --from=lock /upstream.repos /unused_packages.txt /tmp/
 # duatic-with-github-auth authenticates every github.com clone with the token secret, which is
 # mounted only for this layer and never persisted (see scripts/github_auth.sh).
 # --require: these repos are private, so anonymous cannot work.
+# Every later stage reads this src, so a removed package is neither installed for nor built.
 RUN --mount=type=secret,id=GIT_AUTH_TOKEN,required \
     duatic-with-github-auth --require bash -c 'set -euo pipefail; \
     echo "cachebust: ${CACHEBUST}"; \
-    vcs import src < /tmp/upstream.repos'
+    vcs import src < /tmp/upstream.repos; \
+    (cd src && xargs -r -d "\n" rm -rf -- < /tmp/unused_packages.txt)'
 
 ############################
 # sourcetree: the root's checkout without its .git
