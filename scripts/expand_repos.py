@@ -128,7 +128,7 @@ def resolve(url, version, lists):
 
     :param url: the repository to fetch from.
     :param version: a branch, tag or commit.
-    :param lists: the repos list names to look for, as :func:`list_names` returns them.
+    :param lists: the repos.list names to look for, as :func:`list_names` returns them.
     :returns: ``(commit, listed, text, packages)``: listed the first of lists the tree carries and
         text its content, both ``None`` when it carries none, packages every package.xml in the
         tree as its package name mapped to
@@ -201,7 +201,7 @@ def expand(origin, repos, root_url, lists):
     :param origin: the root's list name, for error messages.
     :param repos: the repositories mapping of the root's list.
     :param root_url: the root repository's normalized url, left out wherever a list names it.
-    :param lists: the repos list names to look for, as :func:`list_names` returns them.
+    :param lists: the repos.list names to look for, as :func:`list_names` returns them.
     :returns: ``(merged, pinned, provides)``: the repositories at the versions their lists name,
         the same with every git repository's version replaced by its commit, and per git
         repository the packages it carries (see :func:`resolve`).
