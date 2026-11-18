@@ -18,11 +18,12 @@ Usage:
                                [--push --digests DIR] [--cachebust STR]
                                [--sources-lock FILE] [--resolve-to DIR | --lock DIR]
 
-The checkout roots the workspace: its repos.list collects the other repositories, and its
-packages and dependency manifests go in. The repository is named after the checkout's origin
-remote, and its images after the repository without its duatic_ prefix: duatic_dynaarm
-publishes ghcr.io/duatic/dynaarm (runtime), dynaarm-dev and dynaarm-ci, every distro in each.
-Each run builds for the architecture of the docker daemon it runs on.
+The checkout roots the workspace: its repos.<distro>.list, or repos.list when it has none for the
+distro, collects the other repositories, and its packages and dependency manifests go in. The
+repository is named after the checkout's origin remote, and its images after the repository without
+its duatic_ prefix: duatic_dynaarm publishes ghcr.io/duatic/dynaarm (runtime), dynaarm-dev and
+dynaarm-ci, every distro in each. Each run builds for the architecture of the docker daemon it runs
+on.
 
 Flags:
   --source DIR           a checkout of the repository rooting the image (required)
@@ -46,7 +47,7 @@ Flags:
                          (release tags are immutable), and builds dev only once runtime
                          passed. Used by reusable_release_image.yml.
   --sources-lock FILE    rebuild from the sources.lock.repos of an earlier image instead of
-                         the branches repos.list names; --source must be the root at the
+                         the branches the repos.list names; --source must be the root at the
                          commit FILE names
   --resolve-to DIR       only resolve the repository set into DIR, and exit
   --lock DIR             build the repository set an earlier --resolve-to wrote instead of
@@ -81,7 +82,7 @@ Targets:
           Lenient: CI and runtime gate on its unresolved dependencies. Built on its own as a
           target.
 
-The repository set is resolved first: every branch repos.list names, recursively, is pinned to
+The repository set is resolved first: every branch the repos.list names, recursively, is pinned to
 its commit, and only the packages the checkout's package.xml files depend on, recursively, and
 the repositories carrying them are kept (scripts/expand_repos.py). The ci image is keyed on
 everything it is built from: the cachebust day, the factory files it reads, the ros2-base
@@ -307,6 +308,7 @@ resolve_lock() {
         "${PARENT_ARGS[@]}" \
         "${SOURCE_ARGS[@]}" \
         "${lock_args[@]}" \
+        --build-arg "ROS_DISTRO=${ROS_DISTRO}" \
         --build-arg "CACHEBUST=${CACHEBUST}" \
         "${SECRET_ARG[@]}" \
         --output "type=local,dest=${LOCK_DIR}" \
