@@ -2,6 +2,10 @@
 Changelog
 ^^^^^^^^^
 
+2.1.0 (2026-11-18)
+------------------
+* feat(workspace): read a per-distro repos list when present (#49)
+
 2.0.0 (2026-11-17)
 ------------------
 * feat(factory)!: build only the repositories the root depends on (#43)
