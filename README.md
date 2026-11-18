@@ -167,17 +167,16 @@ The nightly prunes `dev` and `runtime`, and a repository's scheduled CI (ci-work
 ### What makes up a workspace
 
 The calling repository owns its composition. The factory takes its `repos.list`, follows the
-The calling repository owns its composition. The factory takes its `repos.list`, follows the
 `repos.list` of every repository listed there, fails when two of them pin the same repository
 differently, and pins every branch to the commit it points at right now
 (`scripts/expand_repos.py`). Every stage builds those commits. A repository without a
 `repos.list` builds on its own.
 
-A repository's repos.list is `repos.<distro>.list` for the distro being built (for example
-`repos.jazzy.list`), or `repos.list` when it has none for that distro. A distro's list replaces
-`repos.list` entirely, so it names every repository, not only those that differ. This holds for
-the calling repository and for every repository it lists, so one can track a different branch of
-a dependency per distro.
+A repository's `repos.<distro>.list` (for example `repos.jazzy.list`) takes the place of its
+`repos.list` for the distro being built; `repos.list` is read only when the repository has no list
+for that distro. A distro's list replaces `repos.list` entirely, so it names every repository, not
+only those that differ. This holds for the calling repository and for every repository it lists, so
+one can track a different branch of a dependency per distro.
 
 The lists declare where each package comes from. Only the packages a `package.xml` of the
 calling repository depends on, directly or through another package built (any `*depend` tag

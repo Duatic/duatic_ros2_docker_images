@@ -124,7 +124,7 @@ def list_names(distro):
 
 
 def resolve(url, version, lists):
-    """Resolve a git repository's version to a commit and read its repos list and packages there.
+    """Resolve a git repository's version to a commit and read its repos.list and packages there.
 
     :param url: the repository to fetch from.
     :param version: a branch, tag or commit.

@@ -51,7 +51,7 @@ RUN touch /sources.lock.repos
 FROM scratch AS source
 
 ############################
-# resolve: pin the repository set. duatic-expand-repos follows the repos list of every listed
+# resolve: pin the repository set. duatic-expand-repos follows the repos.list of every listed
 # repository (repos.<distro>.list, else repos.list), fails when two of them pin the same repository
 # differently, keeps only the packages the root's package.xml files depend on, recursively, and the
 # repositories carrying them, and pins each to the commit its branch names right now.
