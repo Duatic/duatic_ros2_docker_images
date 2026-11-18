@@ -105,7 +105,7 @@ the ones here.
 
 The factory keeps no list of repositories: a repository calls its reusable workflows, and the
 factory builds the workspace that repository roots (the repository and everything its
-repos list collects) from its checkout, on top of the base images.
+`repos.list` collects) from its checkout, on top of the base images.
 `<name>` is the calling repository's name without its `duatic_` prefix: `duatic_dynaarm`
 publishes `ghcr.io/duatic/dynaarm`, the image its robots run, next to `dynaarm-dev` and
 `dynaarm-ci`. Each image holds every distro; its tags start with the distro, like the base
@@ -167,10 +167,11 @@ The nightly prunes `dev` and `runtime`, and a repository's scheduled CI (ci-work
 ### What makes up a workspace
 
 The calling repository owns its composition. The factory takes its repos list, follows the
-repos list of every repository listed there, fails when two of them pin the same repository
+The calling repository owns its composition. The factory takes its `repos.list`, follows the
+`repos.list` of every repository listed there, fails when two of them pin the same repository
 differently, and pins every branch to the commit it points at right now
 (`scripts/expand_repos.py`). Every stage builds those commits. A repository without a
-repos list builds on its own.
+`repos.list` builds on its own.
 
 A repository's repos list is `repos.<distro>.list` for the distro being built (for example
 `repos.jazzy.list`), or `repos.list` when it has none for that distro. A distro's list replaces

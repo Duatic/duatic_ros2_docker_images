@@ -73,7 +73,7 @@ ARG CACHEBUST=none
 COPY --chmod=755 scripts/github_auth.sh /usr/local/bin/duatic-with-github-auth
 COPY --chmod=755 scripts/expand_repos.py /usr/local/bin/duatic-expand-repos
 COPY --from=sourceslock /sources.lock.repos /tmp/sourceslock.repos
-# The whole checkout, for its repos list and the package.xml files that pick what gets built.
+# The whole checkout, for its repos.list and the package.xml files that pick what gets built.
 RUN --mount=type=bind,from=source,target=/tmp/source \
     --mount=type=secret,id=GIT_AUTH_TOKEN,required \
     duatic-with-github-auth --require bash -c 'set -euo pipefail; \

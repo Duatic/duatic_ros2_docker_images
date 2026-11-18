@@ -47,7 +47,7 @@ Flags:
                          (release tags are immutable), and builds dev only once runtime
                          passed. Used by reusable_release_image.yml.
   --sources-lock FILE    rebuild from the sources.lock.repos of an earlier image instead of
-                         the branches the repos lists name; --source must be the root at the
+                         the branches the repos.lists names; --source must be the root at the
                          commit FILE names
   --resolve-to DIR       only resolve the repository set into DIR, and exit
   --lock DIR             build the repository set an earlier --resolve-to wrote instead of
@@ -82,7 +82,7 @@ Targets:
           Lenient: CI and runtime gate on its unresolved dependencies. Built on its own as a
           target.
 
-The repository set is resolved first: every branch the repos lists name, recursively, is pinned to
+The repository set is resolved first: every branch the repos.lists names, recursively, is pinned to
 its commit, and only the packages the checkout's package.xml files depend on, recursively, and
 the repositories carrying them are kept (scripts/expand_repos.py). The ci image is keyed on
 everything it is built from: the cachebust day, the factory files it reads, the ros2-base
