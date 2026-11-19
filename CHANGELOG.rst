@@ -2,6 +2,11 @@
 Changelog
 ^^^^^^^^^
 
+2.1.1 (2026-11-19)
+------------------
+* fix(workspace): look up the base image digest without registry mirrors (#53)
+* fix(deps): bump library/ros from `d9bcf2e` to `d9f14e8` in /docker (#51)
+
 2.1.0 (2026-11-18)
 ------------------
 * feat(workspace): read a per-distro repos list when present (#49)
