@@ -5,7 +5,6 @@ Changelog
 2.1.2 (2026-11-19)
 ------------------
 * ci(images): build base and nightly images for jazzy only (#56)
-* fix: update CHANGELOG with upcoming changes section
 
 2.1.1 (2026-11-19)
 ------------------
