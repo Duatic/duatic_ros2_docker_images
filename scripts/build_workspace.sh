@@ -323,7 +323,10 @@ ci_key() {
     local factory base
     factory=$(cd "$REPO_ROOT" && find docker scripts config -type f ! -path docker/buildkitd.toml -print0 |
         LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum)
-    base=$(docker buildx imagetools inspect "$ROS2_BASE_IMAGE" --format '{{.Manifest.Digest}}')
+    # The docker context's own builder has no registry mirrors: through the cache, this lookup
+    # syncs the whole image.
+    base=$(docker buildx imagetools inspect --builder "$(docker context show)" "$ROS2_BASE_IMAGE" \
+        --format '{{.Manifest.Digest}}')
     {
         printf '%s\n' "cachebust ${CACHEBUST}" "factory ${factory}" "base ${base}" \
             "distro ${ROS_DISTRO}" "arch ${ARCH}"
