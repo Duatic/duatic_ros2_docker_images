@@ -187,6 +187,11 @@ COPY --chmod=755 config/runtime_entrypoint.sh /root/ros_entrypoint.sh
 ENTRYPOINT [ "/root/ros_entrypoint.sh" ]
 CMD [ "/bin/bash" ]
 
+# ci-recorded: ci's /etc/duatic, unresolved dependencies included, which build_workspace.sh
+# exports to decide whether to publish ci under its key.
+FROM scratch AS ci-recorded
+COPY --from=ci /etc/duatic/ /
+
 ############################
 # workspace: ci + the root repository compiled into the same install, at /opt/duatic/ws.
 # build_workspace.sh replaces the ci stage with the published image when it reuses one.

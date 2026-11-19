@@ -140,7 +140,11 @@ the `ros2-base` digest, the distro, the architecture, the upstream repositories 
 commits, and the repository's own `package.xml`, `Aptfile` and `requirements.txt` files. `build_workspace.sh`
 publishes it under that key and reuses a published one instead of building it again, so a
 day's CI runs, pushes and nightly build it at most once per distro and architecture, and a new commit on any
-upstream branch is picked up by the next run. Releases never reuse it: they build everything
+upstream branch is picked up by the next run. A `ci` image in which a dependency failed to
+install (an `<installer>: <what>` line in `/etc/duatic/unresolved-{rosdep,deps}.txt`, usually a
+mirror outage) is not published: the run still builds on it, so CI's gate reports the failure,
+and the next run builds it again. One whose only gaps are keys rosdep cannot resolve is
+published. Releases never reuse it: they build everything
 from scratch. `dev` and `runtime` share one compile of the repository: the internal,
 never-published `workspace` stage compiles it once on top of `ci`.
 
