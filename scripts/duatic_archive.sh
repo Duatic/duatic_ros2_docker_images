@@ -24,29 +24,26 @@
 
 set -euo pipefail
 
-# Make the Duatic apt archive a dependency source for one image build, then take it away again,
-# keeping only what the image installed from it resolvable for rosdep.
+# Make the Duatic apt archive a dependency source of an image: for its build, and for apt and
+# rosdep in its containers afterwards.
 #
 #   duatic_archive.sh add <keyring> <channels> [<versions>]
-#   duatic_archive.sh remove
+#   duatic_archive.sh record
 #
 # add      makes the archive's <codename>-<channel> suites, for the image's Ubuntu codename and
-#          each of the space-separated <channels>, an apt source signed by <keyring>. apt takes
-#          the highest version any of them holds, except for a package <versions> names: a file
-#          remove wrote, whose versions apt installs exactly. It maps every package the archive
-#          publishes for $ROS_DISTRO as a rosdep key, ahead of the public rosdep index. The caller
-#          runs apt-get update and the installers next.
-# remove   restricts the mapping to the packages installed, so rosdep keeps resolving those,
-#          records their versions in /etc/duatic/archive-versions.txt, and removes the apt source
-#          and the pins: apt never installs or upgrades a Duatic package in the image afterwards.
-#          The caller deletes the apt lists.
+#          each of the space-separated <channels>, an apt source signed by <keyring>, the
+#          archive's public key (config/duatic-archive.gpg), which must stay where it is. apt
+#          takes the highest version any of them holds, except for a package <versions> names: a
+#          file record wrote, whose versions apt installs exactly. It maps every package the
+#          archive publishes for $ROS_DISTRO as a rosdep key, ahead of the public rosdep index.
+#          The caller runs apt-get update and the installers next.
+# record   writes the versions of the archive packages installed to
+#          /etc/duatic/archive-versions.txt and drops the pins of add, so apt upgrade in a
+#          container moves them on. The source and the mapping stay.
 #
 # A Debian name maps to the key it was built from: ros-<distro>-<name> to the ROS package <name>,
 # and a name without the ros- prefix to the system package (duatic_package_kind system) of that
 # name, both with every "-" as "_". A system package wins over a ROS package of the same name.
-#
-# <keyring> is the archive's public key, config/duatic-archive.gpg. apt reads it from there for
-# as long as the source exists, so a bind mount of the build RUN keeps it out of every layer.
 
 URL=https://apt.duatic.com
 SOURCE=/etc/apt/sources.list.d/duatic-archive.sources
@@ -112,17 +109,14 @@ add() {
     echo "duatic_archive: ${URL} ${suites[*]}, ${#deb_of[@]} rosdep keys mapped for ${ROS_DISTRO}."
 }
 
-# remove: see the header.
-remove() {
-    # An entry names its deb between brackets.
-    dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' | awk '$1 == "ii" { print "[" $2 "]" }' |
-        { grep -F -f - "$MAPPING" || true; } | save_mapping
-    sed -n 's/.*\[\(.*\)\].*/\1/p' "$MAPPING" |
-        xargs -r dpkg-query -W -f='${Package} ${Version}\n' >"$VERSIONS"
-    rm -f "$SOURCE" "$PIN"
-    # Drops the packages not installed from rosdep's cache.
-    rosdep update
-    echo "duatic_archive: source removed, the packages installed remain rosdep keys:"
+# record: see the header.
+record() {
+    # The installed packages whose deb a mapping entry names between brackets.
+    dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' |
+        awk 'NR == FNR { deb[$0]; next } $1 == "ii" && ($2 in deb) { print $2, $3 }' \
+            <(sed -n 's/.*\[\(.*\)\].*/\1/p' "$MAPPING") - >"$VERSIONS"
+    rm -f "$PIN"
+    echo "duatic_archive: installed from the archive:"
     cat "$VERSIONS"
 }
 
@@ -134,9 +128,9 @@ case "${1:-}" in
         }
         add "$2" "$3" "${4:-}"
         ;;
-    remove) remove ;;
+    record) record ;;
     *)
-        echo "Usage: $(basename "$0") add <keyring> <channels> [<versions>] | remove" >&2
+        echo "Usage: $(basename "$0") add <keyring> <channels> [<versions>] | record" >&2
         exit 2
         ;;
 esac

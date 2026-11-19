@@ -205,14 +205,18 @@ A release reads the archive's `stable` channel, every other build `edge` and `st
 apt installs the newest version they hold: an `edge` build of `main`, versioned
 `<release>+git<time>.<sha>`, sorts above the release it follows.
 
-The archive is an apt source only while `ci` and `dev` install their dependencies. No image keeps
-its apt source or its key, so `apt upgrade` in a container never moves a Duatic package. Each
-image keeps `/etc/duatic/archive-rosdep.yaml`, the rosdep keys of the Duatic packages it installed,
-so `duatic-deps` and rosdep still resolve those, and records their versions in
-`/etc/duatic/archive-versions.txt`. A `dev` image with the prebuilt workspace installs exactly the versions in the
-workspace's `archive-versions.txt`, the ones it was compiled against. The archive's signing key is
-`config/duatic-archive.gpg` (fingerprint `771C BC98 2764 A2BC B858 F1AE 6FB3 8A5C DC94 256C`): a
-new key ships with a factory release.
+Every image keeps the archive as an apt source, on the channels it was built from, and
+`/etc/duatic/archive-rosdep.yaml`, the rosdep keys of every package the archive published for the
+distro at build time. In a container, `apt update && apt upgrade` brings newer Duatic packages, and
+`duatic-deps` installs Duatic dependencies the image lacks. An upgrade replaces the packages the
+image's `/opt/duatic/ws` was compiled against: rebuild a workspace that stops working against them.
+
+Each image records the versions it installed from the archive in
+`/etc/duatic/archive-versions.txt`. A `dev` image with the prebuilt workspace installs exactly the
+versions in the workspace's `archive-versions.txt`, the ones it was compiled against. The
+archive's signing key is `config/duatic-archive.gpg` (fingerprint
+`771C BC98 2764 A2BC B858 F1AE 6FB3 8A5C DC94 256C`), installed in every image at
+`/etc/apt/keyrings/duatic-archive.gpg`: a new key ships with a factory release.
 
 Dependencies rosdep cannot resolve are declared in `requirements.txt` (pip) and `Aptfile` (apt)
 files at any depth of the workspace, which `duatic-install-extra-deps` installs after rosdep.
