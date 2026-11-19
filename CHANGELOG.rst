@@ -2,6 +2,10 @@
 Changelog
 ^^^^^^^^^
 
+Upcoming changes
+----------------
+* ci(images): build base and nightly images for jazzy only (#56)
+
 2.1.1 (2026-11-19)
 ------------------
 * fix(workspace): look up the base image digest without registry mirrors (#53)
