@@ -66,7 +66,8 @@ jobs:
       - id: gen
         shell: bash
         env:
-          IN_DISTRO: ${{ inputs.ros_distro }}
+          # Jazzy only while the runners are overloaded; ros_distro is ignored.
+          IN_DISTRO: jazzy
           DEFAULT_DISTROS: ${{ env.DEFAULT_DISTROS }}
         run: |
           # Date for image tags (e.g. ghcr.io/duatic/<name>-dev:<distro>-<date>) and the ci key.
