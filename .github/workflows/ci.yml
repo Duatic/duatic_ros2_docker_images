@@ -50,7 +50,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ros_distro: [humble, jazzy, kilted, lyrical, rolling]
+        # Jazzy only while the runners are overloaded.
+        ros_distro: [jazzy]
     uses: ./.github/workflows/build_base_images.yml
     permissions:
       contents: read
