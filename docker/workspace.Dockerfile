@@ -25,6 +25,12 @@
 #                     detached): the root's entry in the source manifests
 #   CACHEBUST         bump (e.g. to the date) to force a fresh clone, and a fresh
 #                     apt-get update/upgrade in ci/dev
+#   DUATIC_ARCHIVE_CHANNELS
+#                     the channels of the Duatic apt archive ci and dev install Duatic packages
+#                     from: `stable` for a release, `edge stable` otherwise
+#   DUATIC_ARCHIVE_STATE
+#                     per suite read, the digest of the versions of this distro's packages in
+#                     it, so a change in them reruns those installs
 #
 # The stages need a GitHub token, both for the private repos and to keep the public clones in
 # the dependency/compile layers off the per-IP anonymous rate limit. Use
@@ -156,13 +162,23 @@ COPY --chmod=755 scripts/duatic_deps.sh /usr/local/bin/duatic-deps
 COPY --chmod=755 scripts/rosdep_install.sh /usr/local/bin/duatic-rosdep-install
 
 # Resolve deps. The manifests serve only this; the compile below sees exactly fetch's sources.
+# Duatic packages come from the Duatic apt archive, an apt source for this RUN only: the image
+# keeps neither it nor its key, only the rosdep keys of what got installed
+# (scripts/duatic_archive.sh).
+ARG DUATIC_ARCHIVE_CHANNELS
+ARG DUATIC_ARCHIVE_STATE=none
 COPY --from=manifests /src/ ${DUATIC_WS}/src/
 RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
+    --mount=type=bind,source=scripts/duatic_archive.sh,target=/usr/local/bin/duatic-archive \
+    --mount=type=bind,source=config/duatic-archive.gpg,target=/etc/apt/keyrings/duatic-archive.gpg \
     echo "cachebust: ${CACHEBUST}" && \
+    echo "archive: ${DUATIC_ARCHIVE_STATE}" && \
+    duatic-archive add /etc/apt/keyrings/duatic-archive.gpg "${DUATIC_ARCHIVE_CHANNELS}" && \
     apt-get update && \
     apt-get upgrade -y && \
     duatic-rosdep-install src "$ROS_DISTRO" && \
     duatic-with-github-auth duatic-install-extra-deps src --lenient && \
+    duatic-archive remove && \
     apt-get clean && rm -rf /var/lib/apt/lists/* src
 
 # Colcon build, keeping only the compiled install/. The sources are bind-mounted so no layer
@@ -218,10 +234,12 @@ RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
 COPY --from=lock /sources.lock.repos /etc/duatic/sources.lock.repos
 
 ############################
-# underlay: the prebuilt workspace dev copies in, or nothing for a lean dev
+# underlay: the prebuilt workspace dev copies in, or nothing for a lean dev, and the versions of
+# the Duatic apt archive packages it was compiled against, which dev installs. A lean dev has
+# none and takes the newest.
 ############################
 FROM alpine AS no-underlay
-RUN mkdir -p /opt/duatic/ws
+RUN mkdir -p /opt/duatic/ws /etc/duatic && touch /etc/duatic/archive-versions.txt
 
 # hadolint ignore=DL3006
 FROM ${UNDERLAY_REF} AS underlay
@@ -252,13 +270,24 @@ COPY --chmod=755 scripts/rosdep_install.sh /usr/local/bin/duatic-rosdep-install
 # Resolve deps: the same manifests workspace resolved, so the underlay's libraries are present.
 # LENIENT: a missing dependency is recorded in /etc/duatic/unresolved-{rosdep,deps}.txt.
 # The deps stamp is written only for a complete install, so duatic-deps --if-changed retries the rest.
+# Duatic packages come from the Duatic apt archive, for this RUN only, as in ci, at the versions
+# the underlay was compiled against.
+ARG DUATIC_ARCHIVE_CHANNELS
+ARG DUATIC_ARCHIVE_STATE=none
 COPY --from=manifests /src/ ${ROS_WS}/src/
 RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
+    --mount=type=bind,source=scripts/duatic_archive.sh,target=/usr/local/bin/duatic-archive \
+    --mount=type=bind,source=config/duatic-archive.gpg,target=/etc/apt/keyrings/duatic-archive.gpg \
+    --mount=type=bind,from=underlay,source=/etc/duatic/archive-versions.txt,target=/tmp/archive-versions.txt \
     echo "cachebust: ${CACHEBUST}" && \
+    echo "archive: ${DUATIC_ARCHIVE_STATE}" && \
+    duatic-archive add /etc/apt/keyrings/duatic-archive.gpg "${DUATIC_ARCHIVE_CHANNELS}" \
+        /tmp/archive-versions.txt && \
     apt-get update && \
     apt-get upgrade -y && \
     duatic-rosdep-install src "$ROS_DISTRO" && \
     duatic-with-github-auth duatic-install-extra-deps src --lenient && \
+    duatic-archive remove && \
     { [ -s /etc/duatic/unresolved-rosdep.txt ] || [ -s /etc/duatic/unresolved-deps.txt ] || \
       duatic-deps --list src > /etc/duatic/deps.stamp; } && \
     rm -rf ~/.config/ros.org/rqt_gui* && \
