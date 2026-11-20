@@ -88,7 +88,9 @@ the repositories carrying them are kept (scripts/expand_repos.py). The ci image 
 everything it is built from: the cachebust day, the factory files it reads, the ros2-base
 digest, the distro, the architecture, the pinned upstream repositories and the checkout's
 package.xml, Aptfile and requirements.txt files. When an image with that key is published,
-every target reuses it instead of building it. A release never reuses one.
+every target reuses it instead of building it. A release never reuses one. A ci image in which a
+dependency failed to install is not published, so the next run builds it again; keys rosdep
+cannot resolve do not stop the publish.
 
 ensure_workspace_build() compiles the checkout on top of ci once per script invocation, at
 /opt/duatic/ws (Dockerfile target `workspace`), into BuildKit's cache only: it is an internal
@@ -195,8 +197,6 @@ ORIGIN_URL=$(git -C "$SOURCE_DIR" remote get-url origin) || {
 source "${SCRIPT_DIR}/image_env.sh"
 image_env_resolve "$(basename "$ORIGIN_URL" .git)" "$DISTRO_FLAG"
 
-OUTPUT_ARG=(--load)
-$PUSH && OUTPUT_ARG=(--push)
 # The architecture this run builds for: the docker daemon's, which the builder runs on.
 ARCH=$(docker version --format '{{.Server.Arch}}')
 
@@ -337,15 +337,21 @@ ci_key() {
 
 # The ci image every other target builds on, once per script invocation (Dockerfile target
 # ci): reused when an image with this run's key is published, built otherwise. A pushed
-# non-release build publishes what it built under the key; a release never reuses one and
-# keeps its own in BuildKit's cache. On reuse, every later build's ci stage is the published
-# image. Sets CI_REF, and CI_OK (true/false, never unset after the first call).
+# non-release build publishes what it built under the key, unless a dependency failed to
+# install; a release never reuses one and keeps its own in BuildKit's cache. On reuse, every
+# later build's ci stage is the published image. Sets CI_REF, and CI_OK (true/false, never
+# unset after the first call).
 CI_OK=""
 ensure_ci() {
     [[ -n "$CI_OK" ]] && return 0
-    local output=(--output type=cacheonly)
+    local output=(--output type=cacheonly) recorded="${LOCK_DIR}/ci-recorded"
+    local build=(docker buildx build -f "$DOCKERFILE" "${PARENT_ARGS[@]}" "${SOURCE_ARGS[@]}"
+                 --build-arg "CACHEBUST=${CACHEBUST}" "${PARALLEL_ARGS[@]}"
+                 "${SECRET_ARG[@]}")
+    CI_OK=false
     if [[ -n "$VERSION_FLAG" ]]; then
         CI_REF="the release's own (not published)"
+        echo ">>> Building ci: ${CI_REF}"
     else
         CI_REF="${CI_IMAGE}:${ROS_DISTRO}-${ARCH}-$(ci_key)"
         if docker manifest inspect "$CI_REF" >/dev/null 2>&1; then
@@ -354,31 +360,33 @@ ensure_ci() {
             CI_OK=true
             return 0
         fi
-        # Published as a single manifest without provenance: each key is then one package
-        # version, which the nightly's pruning deletes whole, with no attestation manifests left.
-        if $BUILD_CI || $PUSH; then
-            output=("${OUTPUT_ARG[@]}" --provenance=false --tag "$CI_REF")
+        echo ">>> Building ci: ${CI_REF}"
+        if $BUILD_CI; then
+            output=(--load --provenance=false --tag "$CI_REF")
         fi
-        # A pushed --target ci is run next by its caller (actions/build-image), which then needs
-        # no pull. dev and runtime only build on it, so they do not load it.
-        if $BUILD_CI && $PUSH; then
-            output+=(--load)
+        # The installers record a failed install as "<installer>: <what>" and a key rosdep cannot
+        # resolve as the key alone. A failed install is mostly transient (a mirror outage), so an
+        # image holding one is not published and the next run with this key builds it again.
+        if $PUSH; then
+            if ! "${build[@]}" --target ci-recorded --output "type=local,dest=${recorded}" "$REPO_ROOT"; then
+                echo ">>> ci build FAILED for ${IMAGE_NAME}/${ROS_DISTRO}." >&2
+                return 0
+            fi
+            if grep -qs ': ' "$recorded"/unresolved-*.txt; then
+                echo ">>> Not publishing ${CI_REF}: dependencies failed to install, so the next run builds it again." >&2
+            else
+                # Published as a single manifest without provenance: each key is then one package
+                # version, which the nightly's pruning deletes whole, with no attestation manifests
+                # left. A pushed --target ci is run next by its caller (actions/build-image), which
+                # then needs no pull. dev and runtime only build on it, so they do not load it.
+                output=(--push --provenance=false --tag "$CI_REF")
+                $BUILD_CI && output+=(--load)
+            fi
         fi
     fi
-    echo ">>> Building ci: ${CI_REF}"
-    if docker buildx build \
-        -f "$DOCKERFILE" \
-        --target ci \
-        "${PARENT_ARGS[@]}" \
-        "${SOURCE_ARGS[@]}" \
-        --build-arg "CACHEBUST=${CACHEBUST}" \
-        "${PARALLEL_ARGS[@]}" \
-        "${SECRET_ARG[@]}" \
-        "${output[@]}" \
-        "$REPO_ROOT"; then
+    if "${build[@]}" --target ci "${output[@]}" "$REPO_ROOT"; then
         CI_OK=true
     else
-        CI_OK=false
         echo ">>> ci build FAILED for ${IMAGE_NAME}/${ROS_DISTRO}." >&2
     fi
 }
