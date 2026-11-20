@@ -22,7 +22,8 @@
 # NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-# Duatic dev container build helpers: `cb` (colcon build) and `cc` (clean).
+# Duatic dev container helpers: `cb` (colcon build), `cc` (clean) and the `ros2 launch`
+# wrapper.
 #
 # Loaded the same way as 10-duatic-ros.sh, which must come first — these call
 # duatic_source_ros_env to refresh the environment after a build or a clean.
@@ -143,5 +144,21 @@ cc() {
 
     echo "Workspace ${ROS_WS:-/ros2_ws} cleaned."
 }
+
+# `ros2 launch` goes through duatic-launch, which also copies the output to the host
+# journal. `command ros2 launch` runs it directly. Interactive shells only, so a script
+# or a `bash -lc` command keeps the plain ros2.
+case $- in
+    *i*)
+        ros2() {
+            if [ "${1:-}" = "launch" ] && [ -S /dev/log ]; then
+                shift
+                duatic-launch "$@"
+            else
+                command ros2 "$@"
+            fi
+        }
+        ;;
+esac
 
 return 0

@@ -100,6 +100,11 @@ RUN git config --system --add safe.directory '*'
 COPY --chmod=755 scripts/rosdep_install.sh /usr/local/bin/duatic-rosdep-install
 COPY --chmod=755 scripts/install_extra_deps.sh /usr/local/bin/duatic-install-extra-deps
 
+# `ros2 launch` and `ros2 run` with their output copied to the host journal. One script
+# under two names, see its header.
+COPY --chmod=755 config/bin/duatic-launch /usr/local/bin/
+RUN ln -s duatic-launch /usr/local/bin/duatic-run
+
 ############################
 # dev: base + developer tooling + dev-container shell environment.
 ############################

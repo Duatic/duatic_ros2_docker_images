@@ -1,0 +1,72 @@
+#!/bin/bash
+# Copyright 2026 Duatic AG
+#
+# Redistribution and use in source and binary forms, with or without modification, are permitted provided that
+# the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this list of conditions, and
+#    the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions, and
+#    the following disclaimer in the documentation and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or
+#    promote products derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+# PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+# TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+# NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+# duatic-launch and duatic-run: `ros2 launch` and `ros2 run`, with their output also copied
+# to the host journal. One script, installed under both names: the name picks the verb.
+#
+# Takes the arguments of the ros2 verb. Each line is sent to the syslog socket at /dev/log
+# under the tag duatic-launch or duatic-run, with the priority of its ROS severity, so on
+# the host
+#   journalctl -t duatic-launch -p err
+# lists the errors. Without that socket the command runs unchanged.
+#
+# For commands started from a shell in a running container. As a container's main command
+# the end of the output would be lost, since the copy is stopped with the container: use
+# Docker's journald log driver there.
+
+name="${0##*/}"
+case "$name" in
+    duatic-launch) cmd=(ros2 launch) ;;
+    duatic-run)
+        # A node started by `ros2 run` writes to this pipe itself, and would hold its
+        # output back in a block buffer.
+        export PYTHONUNBUFFERED=1
+        cmd=(stdbuf -oL ros2 run)
+        ;;
+    *) echo "$name: expected to be called as duatic-launch or duatic-run" >&2; exit 2 ;;
+esac
+
+if [ ! -S /dev/log ]; then
+    echo "$name: no /dev/log here, the output is not copied to the journal" >&2
+    exec "${cmd[@]}" "$@"
+fi
+
+# The syslog priority of a line, from the severity ROS prints at its start or after the
+# process name launch puts in front. Colour codes are removed first.
+PRIORITY_PREFIX='
+s/\x1b\[[0-9;]*m//g
+/(^|\] )\[FATAL\] \[/{s/^/<2>/;b}
+/(^|\] )\[ERROR\] \[/{s/^/<3>/;b}
+/(^|\] )\[WARN(ING)?\] \[/{s/^/<4>/;b}
+/(^|\] )\[DEBUG\] \[/{s/^/<7>/;b}
+s/^/<6>/
+'
+
+# The command replaces this script, so signals and the exit status are its own. The copy
+# ignores those signals, to stay up and carry the shutdown output, and ends when the
+# command closes its output.
+exec "${cmd[@]}" "$@" > >(
+    trap '' INT TERM HUP
+    exec tee >(sed -u -E "$PRIORITY_PREFIX" | logger --prio-prefix -t "$name")
+) 2>&1
