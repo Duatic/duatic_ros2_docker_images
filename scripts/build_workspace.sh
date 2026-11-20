@@ -86,8 +86,9 @@ Targets:
 The repository set is resolved first: every branch the repos.list names, recursively, is pinned to
 its commit, and only the packages the checkout's package.xml files depend on, recursively, and
 the repositories carrying them are kept (scripts/expand_repos.py). rosdep installs every other
-dependency, Duatic packages from the Duatic apt archive (https://apt.duatic.com): the newest of
-its edge and stable channels, or of stable alone for a release. The ci image is keyed on
+dependency, Duatic packages from the Duatic apt archive (https://apt.duatic.com): from its
+nightly channel, else from stable, or from stable alone for a release. A package kept that the
+archive also publishes on one of those channels is an error. The ci image is keyed on
 everything it is built from: the cachebust day, the factory files it reads, the ros2-base
 digest, the distro, the architecture, the state of the archive channels it reads, the pinned
 upstream repositories and the checkout's package.xml, Aptfile and requirements.txt files. When
@@ -283,7 +284,7 @@ setup_cache() {
 }
 
 # The files a resolved repository set consists of (see scripts/expand_repos.py).
-LOCK_FILES=(upstream.repos sources.lock.repos sources.repos unused_packages.txt)
+LOCK_FILES=(upstream.repos sources.lock.repos sources.repos unused_packages.txt built_packages.txt)
 
 # Pin the repository set (Dockerfile target lock, see its resolve stage), or take the one --lock
 # names, and pass it to every later build as the lock context, so they all build exactly the
@@ -323,9 +324,11 @@ resolve_lock() {
 # their suites for the image's Ubuntu release: per suite, the digest of the name and version of
 # every package this distro and architecture can install from it (ros-<distro>-* and the system
 # packages), so a publish for another distro changes nothing. It goes into the ci key and the build
-# arg that reruns the dependency installs of ci and dev. Sets ARCHIVE_STATE and ARCHIVE_ARGS.
+# arg that reruns the dependency installs of ci and dev. A package the repository set builds from
+# source that the archive also publishes is an error: its repository must leave repos.list. Sets
+# ARCHIVE_STATE and ARCHIVE_ARGS.
 resolve_archive() {
-    local channels=(edge stable) codename channel digest
+    local channels=(nightly stable) codename channel digest overlap
     if [[ -n "$VERSION_FLAG" ]]; then
         channels=(stable)
     fi
@@ -341,14 +344,26 @@ resolve_archive() {
     esac
     ARCHIVE_STATE=""
     for channel in "${channels[@]}"; do
-        digest=$(curl -fsSL \
+        curl -fsSL \
             "https://apt.duatic.com/dists/${codename}-${channel}/main/binary-${ARCH}/Packages.gz" |
             gzip -dc | awk -v ros="ros-${ROS_DISTRO}-" '/^Package: / { p = $2 }
                 /^Version: / && (index(p, ros) == 1 || p !~ /^ros-/) { print p, $2 }' |
-            LC_ALL=C sort | sha256sum)
+            LC_ALL=C sort >"${LOCK_DIR}/archive-${channel}.txt"
+        digest=$(sha256sum <"${LOCK_DIR}/archive-${channel}.txt")
         ARCHIVE_STATE+="${ARCHIVE_STATE:+ }${codename}-${channel}=${digest%% *}"
     done
     echo ">>> Duatic apt archive: ${ARCHIVE_STATE}"
+    # Each deb as the package it was built from, as scripts/duatic_archive.sh maps it.
+    overlap=$(awk -v ros="ros-${ROS_DISTRO}-" -v built="${LOCK_DIR}/built_packages.txt" '
+        FILENAME != built { p = $1; sub("^" ros, "", p); gsub("-", "_", p); deb[p]; next }
+        $1 in deb { print "  " $1 " (repository " $2 ")" }' \
+        "${LOCK_DIR}"/archive-*.txt "${LOCK_DIR}/built_packages.txt")
+    if [[ -n "$overlap" ]]; then
+        echo "Error: built from source by repos.list, and published in the apt archive's" \
+            "${channels[*]} channels. Remove their repositories from repos.list:" >&2
+        echo "$overlap" >&2
+        exit 1
+    fi
     ARCHIVE_ARGS=(--build-arg "DUATIC_ARCHIVE_CHANNELS=${channels[*]}"
                   --build-arg "DUATIC_ARCHIVE_STATE=${ARCHIVE_STATE}")
 }
@@ -590,6 +605,7 @@ if [[ -n "$VERSION_FLAG" ]]; then
 fi
 
 resolve_lock
+resolve_archive
 if [[ -n "$RESOLVE_TO_FLAG" ]]; then
     mkdir -p "$RESOLVE_TO_FLAG"
     cp "${LOCK_FILES[@]/#/${LOCK_DIR}/}" "$RESOLVE_TO_FLAG"
@@ -597,7 +613,6 @@ if [[ -n "$RESOLVE_TO_FLAG" ]]; then
 fi
 DIGEST_DIR="${DIGESTS_FLAG:-${LOCK_DIR}/digests}"
 mkdir -p "$DIGEST_DIR"
-resolve_archive
 
 if $BUILD_CI; then
     ensure_ci

@@ -27,7 +27,8 @@
 #                     apt-get update/upgrade in ci/dev
 #   DUATIC_ARCHIVE_CHANNELS
 #                     the channels of the Duatic apt archive ci and dev install Duatic packages
-#                     from: `stable` for a release, `edge stable` otherwise
+#                     from, the first preferred: `stable` for a release, `nightly stable`
+#                     otherwise
 #   DUATIC_ARCHIVE_STATE
 #                     per suite read, the digest of the versions of this distro's packages in
 #                     it, so a change in them reruns those installs
@@ -93,8 +94,8 @@ RUN --mount=type=bind,from=source,target=/tmp/source \
     duatic-expand-repos --root "${root[@]}" --checkout /tmp/source --distro "${ROS_DISTRO}" \
         --out /out "${locked[@]}"'
 
-# lock: upstream.repos, sources.lock.repos, sources.repos and unused_packages.txt at the root
-# (see expand_repos.py).
+# lock: upstream.repos, sources.lock.repos, sources.repos, unused_packages.txt and
+# built_packages.txt at the root (see expand_repos.py).
 FROM scratch AS lock
 COPY --from=resolve /out/ /
 
@@ -157,9 +158,10 @@ WORKDIR ${DUATIC_WS}
 COPY --chmod=755 scripts/github_auth.sh /usr/local/bin/duatic-with-github-auth
 # This factory's duatic-deps, whose --gate runtime and the CI test run, and the
 # duatic-rosdep-install that records what the gate reads, whichever ros2-base release the image
-# builds on.
+# builds on. duatic-archive configures the Duatic apt archive and keeps its rosdep mapping current.
 COPY --chmod=755 scripts/duatic_deps.sh /usr/local/bin/duatic-deps
 COPY --chmod=755 scripts/rosdep_install.sh /usr/local/bin/duatic-rosdep-install
+COPY --chmod=755 scripts/duatic_archive.sh /usr/local/bin/duatic-archive
 
 # Resolve deps. The manifests serve only this; the compile below sees exactly fetch's sources.
 # Duatic packages come from the Duatic apt archive, which stays an apt source and rosdep source
@@ -169,7 +171,6 @@ ARG DUATIC_ARCHIVE_STATE=none
 COPY config/duatic-archive.gpg /etc/apt/keyrings/duatic-archive.gpg
 COPY --from=manifests /src/ ${DUATIC_WS}/src/
 RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
-    --mount=type=bind,source=scripts/duatic_archive.sh,target=/usr/local/bin/duatic-archive \
     echo "cachebust: ${CACHEBUST}" && \
     echo "archive: ${DUATIC_ARCHIVE_STATE}" && \
     duatic-archive add /etc/apt/keyrings/duatic-archive.gpg "${DUATIC_ARCHIVE_CHANNELS}" && \
@@ -235,7 +236,7 @@ COPY --from=lock /sources.lock.repos /etc/duatic/sources.lock.repos
 ############################
 # underlay: the prebuilt workspace dev copies in, or nothing for a lean dev, and the versions of
 # the Duatic apt archive packages it was compiled against, which dev installs. A lean dev has
-# none and takes the newest.
+# none and takes what the archive's channels offer.
 ############################
 FROM alpine AS no-underlay
 RUN mkdir -p /opt/duatic/ws /etc/duatic && touch /etc/duatic/archive-versions.txt
@@ -263,8 +264,10 @@ RUN mkdir -p /etc/duatic
 COPY --from=lock /sources.lock.repos /sources.repos /etc/duatic/
 
 COPY --chmod=755 scripts/github_auth.sh /usr/local/bin/duatic-with-github-auth
-# This factory's duatic-rosdep-install, as in ci.
+# This factory's duatic-deps, duatic-rosdep-install and duatic-archive, as in ci.
+COPY --chmod=755 scripts/duatic_deps.sh /usr/local/bin/duatic-deps
 COPY --chmod=755 scripts/rosdep_install.sh /usr/local/bin/duatic-rosdep-install
+COPY --chmod=755 scripts/duatic_archive.sh /usr/local/bin/duatic-archive
 
 # Resolve deps: the same manifests workspace resolved, so the underlay's libraries are present.
 # LENIENT: a missing dependency is recorded in /etc/duatic/unresolved-{rosdep,deps}.txt.
@@ -276,7 +279,6 @@ ARG DUATIC_ARCHIVE_STATE=none
 COPY config/duatic-archive.gpg /etc/apt/keyrings/duatic-archive.gpg
 COPY --from=manifests /src/ ${ROS_WS}/src/
 RUN --mount=type=secret,id=GIT_AUTH_TOKEN \
-    --mount=type=bind,source=scripts/duatic_archive.sh,target=/usr/local/bin/duatic-archive \
     --mount=type=bind,from=underlay,source=/etc/duatic/archive-versions.txt,target=/tmp/archive-versions.txt \
     echo "cachebust: ${CACHEBUST}" && \
     echo "archive: ${DUATIC_ARCHIVE_STATE}" && \

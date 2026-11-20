@@ -191,7 +191,10 @@ counts), are built and have their dependencies installed, and only the repositor
 of them are cloned. Every other package is removed from the image's sources after the clone (the
 `sources.repos` manifest still names whole repositories), so a repository must declare every
 package it needs from another Duatic repository in its `package.xml`. A dependency no list
-provides is left to rosdep.
+provides is left to rosdep. A package built this way that the
+[apt archive](#duatic-packages-from-the-apt-archive) also publishes, on a channel the build
+reads, stops the build before anything else runs: remove its repository from the list, and
+rosdep installs the deb instead.
 
 #### Duatic packages from the apt archive
 
@@ -201,15 +204,18 @@ public index. The ROS package `duatic_helpers` is the deb `ros-<distro>-duatic-h
 system package (`<duatic_package_kind>system</duatic_package_kind>`) is the deb of its name with
 every `_` as `-`.
 
-A release reads the archive's `stable` channel, every other build `edge` and `stable` together.
-apt installs the newest version they hold: an `edge` build of `main`, versioned
-`<release>+git<time>.<sha>`, sorts above the release it follows.
+A release reads the archive's `stable` channel, every other build `nightly` and `stable`.
+apt takes a package from `nightly` whenever `nightly` holds it, whatever version `stable` holds,
+and from `stable` otherwise: a patch release of an older version never replaces the build of
+`main`.
 
 Every image keeps the archive as an apt source, on the channels it was built from, and
-`/etc/duatic/archive-rosdep.yaml`, the rosdep keys of every package the archive published for the
-distro at build time. In a container, `apt update && apt upgrade` brings newer Duatic packages, and
-`duatic-deps` installs Duatic dependencies the image lacks. An upgrade replaces the packages the
-image's `/opt/duatic/ws` was compiled against: rebuild a workspace that stops working against them.
+`/etc/duatic/archive-rosdep.yaml`, the rosdep keys of every package the archive publishes for the
+distro. In a container, `duatic-deps` maps what the archive publishes at that moment and installs
+the Duatic dependencies the image lacks, from the image's channels. It leaves the Duatic packages
+already installed at their versions. Their dependencies on each other carry no version, so a new
+package built against a newer version of one of them installs, and can still fail to link or
+run against the older one: then install that dependency's newer version by hand.
 
 Each image records the versions it installed from the archive in
 `/etc/duatic/archive-versions.txt`. A `dev` image with the prebuilt workspace installs exactly the

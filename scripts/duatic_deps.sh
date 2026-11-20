@@ -92,6 +92,12 @@ fi
 : "${ROS_DISTRO:?ROS_DISTRO not set}"
 
 sudo apt-get update
+# A new Duatic package resolves through the archive's mapping, so map what it publishes now.
+# Without the archive, the mapping of the image's build still resolves everything else.
+if command -v duatic-archive >/dev/null && ! sudo --preserve-env=ROS_DISTRO duatic-archive refresh; then
+    echo "duatic-deps: cannot reach the Duatic apt archive; Duatic packages published after this" \
+        "image was built will not resolve. Continuing with the rest." >&2
+fi
 # rosdep --ignore-src skips packages on AMENT_PREFIX_PATH (the underlay), which sudo would drop.
 sudo --preserve-env=AMENT_PREFIX_PATH duatic-rosdep-install "$SRC" "$ROS_DISTRO"
 sudo duatic-install-extra-deps "$SRC" --lenient
