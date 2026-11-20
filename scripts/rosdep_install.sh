@@ -26,8 +26,9 @@ set -euo pipefail
 
 # Resolve rosdep dependencies for a workspace, degrading gracefully.
 #
-# Installs every dependency rosdep *can* resolve, records the keys it *cannot*
-# (no rosdep rule for this distro) to /etc/duatic/unresolved-rosdep.txt, and prints
+# Installs every dependency rosdep *can* resolve, records what is still missing afterwards to
+# /etc/duatic/unresolved-rosdep.txt (the keys with no rosdep rule for this distro, and as
+# "<installer>: <package>" each resolved dependency that failed to install), and prints
 # a prominent warning. Completeness is auto-detected: an EMPTY manifest == complete.
 #
 #   rosdep_install.sh <src_path> <ros_distro> [--strict]
@@ -50,30 +51,27 @@ MANIFEST=/etc/duatic/unresolved-rosdep.txt
 mkdir -p "$(dirname "$MANIFEST")"
 : > "$MANIFEST"
 
-ERR_LOG="$(mktemp)"
-trap 'rm -f "$ERR_LOG"' EXIT
-
 rosdep update
 
-# Install everything resolvable. -r continues past unresolvable keys; we capture
-# stderr to discover which keys had no rosdep rule for this distro.
+# Install everything resolvable. -r continues past unresolvable keys and failed installs.
 set +e
-rosdep install -r --from-paths "$SRC" --ignore-src --rosdistro "$ROS_DISTRO_ARG" -y 2>"$ERR_LOG"
+rosdep install -r --from-paths "$SRC" --ignore-src --rosdistro "$ROS_DISTRO_ARG" -y
 rc=$?
 set -e
-cat "$ERR_LOG" >&2   # surface rosdep's stderr in the build log
 
-# Keys with no rosdep rule for this distro — the ones a developer must fix.
+# What rosdep check still finds missing: keys with no rosdep rule for this distro, and the
+# "<installer>\t<package>" lines of resolved dependencies that are not installed.
 mapfile -t unresolved < <(
-    grep -oE 'Cannot locate rosdep definition for \[[^]]+\]' "$ERR_LOG" \
-        | sed -E 's/.*\[([^]]+)\].*/\1/' | sort -u
+    rosdep check --from-paths "$SRC" --ignore-src --rosdistro "$ROS_DISTRO_ARG" 2>&1 |
+        sed -nE -e 's/.*Cannot locate rosdep definition for \[([^]]+)\].*/\1/p' \
+            -e 's/^([a-z]+)\t(.+)/\1: \2/p' | sort -u
 )
 
 if [[ ${#unresolved[@]} -gt 0 ]]; then
     printf '%s\n' "${unresolved[@]}" > "$MANIFEST"
     echo ""
     echo "=================================================================="
-    echo "WARNING: unresolved rosdep keys for '${ROS_DISTRO_ARG}':"
+    echo "WARNING: unresolved rosdep dependencies for '${ROS_DISTRO_ARG}':"
     printf '  - %s\n' "${unresolved[@]}"
     echo "recorded in ${MANIFEST}"
     echo "=================================================================="

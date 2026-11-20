@@ -149,9 +149,11 @@ ENV DUATIC_WS=/opt/duatic/ws
 WORKDIR ${DUATIC_WS}
 
 COPY --chmod=755 scripts/github_auth.sh /usr/local/bin/duatic-with-github-auth
-# This factory's duatic-deps, whose --gate runtime and the CI test run, whichever ros2-base
-# release the image builds on.
+# This factory's duatic-deps, whose --gate runtime and the CI test run, and the
+# duatic-rosdep-install that records what the gate reads, whichever ros2-base release the image
+# builds on.
 COPY --chmod=755 scripts/duatic_deps.sh /usr/local/bin/duatic-deps
+COPY --chmod=755 scripts/rosdep_install.sh /usr/local/bin/duatic-rosdep-install
 
 # Resolve deps. The manifests serve only this; the compile below sees exactly fetch's sources.
 COPY --from=manifests /src/ ${DUATIC_WS}/src/
@@ -239,6 +241,8 @@ RUN mkdir -p /etc/duatic
 COPY --from=lock /sources.lock.repos /sources.repos /etc/duatic/
 
 COPY --chmod=755 scripts/github_auth.sh /usr/local/bin/duatic-with-github-auth
+# This factory's duatic-rosdep-install, as in ci.
+COPY --chmod=755 scripts/rosdep_install.sh /usr/local/bin/duatic-rosdep-install
 
 # Resolve deps: the same manifests workspace resolved, so the underlay's libraries are present.
 # LENIENT: a missing dependency is recorded in /etc/duatic/unresolved-{rosdep,deps}.txt.

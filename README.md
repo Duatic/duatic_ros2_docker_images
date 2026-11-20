@@ -187,9 +187,9 @@ package it needs from another Duatic repository in its `package.xml`.
 
 Dependencies rosdep cannot resolve are declared in `requirements.txt` (pip) and `Aptfile` (apt)
 files at any depth of the workspace, which `duatic-install-extra-deps` installs after rosdep.
-Both passes in the `ci` stage are **lenient**: unresolvable rosdep keys go to
-`/etc/duatic/unresolved-rosdep.txt` and uninstallable manifests to
-`/etc/duatic/unresolved-deps.txt`, without blocking the compile. Both files ship inside `ci` and
+Both passes in the `ci` stage are **lenient**: rosdep keys that cannot be resolved, and the
+packages of those that failed to install, go to `/etc/duatic/unresolved-rosdep.txt` and
+uninstallable manifests to `/etc/duatic/unresolved-deps.txt`, without blocking the compile. Both files ship inside `ci` and
 `dev`; `runtime` fails when either is non-empty, and so does CI's test job.
 
 ### Every image knows what it is made of
