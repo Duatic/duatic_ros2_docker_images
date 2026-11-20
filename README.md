@@ -209,6 +209,13 @@ apt takes a package from `nightly` whenever `nightly` holds it, whatever version
 and from `stable` otherwise: a patch release of an older version never replaces the build of
 `main`.
 
+The archive's packages depend on each other without versions, so a channel can hold one built
+against another version of a dependency than the one it serves. `ci`, `dev` and `duatic-deps`
+run `ldd -r` over the shared libraries of every package installed from the archive, and record
+one that misses a symbol or a library as `link: <package>` in
+`/etc/duatic/unresolved-rosdep.txt`, a failed install like any other. It catches a removed or
+renamed symbol, not a changed type behind the same one.
+
 Every image keeps the archive as an apt source, on the channels it was built from, and
 `/etc/duatic/archive-rosdep.yaml`, the rosdep keys of every package the archive publishes for the
 distro. In a container, `duatic-deps` maps what the archive publishes at that moment and installs

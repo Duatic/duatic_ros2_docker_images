@@ -101,6 +101,10 @@ fi
 # rosdep --ignore-src skips packages on AMENT_PREFIX_PATH (the underlay), which sudo would drop.
 sudo --preserve-env=AMENT_PREFIX_PATH duatic-rosdep-install "$SRC" "$ROS_DISTRO"
 sudo duatic-install-extra-deps "$SRC" --lenient
+# The archive packages now installed, and those of them whose libraries do not link.
+if command -v duatic-archive >/dev/null; then
+    sudo --preserve-env=ROS_DISTRO duatic-archive record
+fi
 # No apt-get clean: a container may mount apt lists and downloaded packages as a cache.
 
 # Only a complete install is recorded, so --if-changed retries anything that failed.

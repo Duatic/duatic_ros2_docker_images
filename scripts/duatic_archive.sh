@@ -40,7 +40,10 @@ set -euo pipefail
 #          the public rosdep index. The caller runs apt-get update and the installers next.
 # record   writes the versions of the archive packages installed to
 #          /etc/duatic/archive-versions.txt and drops the version pins of add, so a container can
-#          install a newer one by hand. The source, the channel order and the mapping stay.
+#          install a newer one by hand. The source, the channel order and the mapping stay. Each
+#          installed archive package with a shared library that does not link against the others,
+#          built against another version of a dependency than the one installed, goes to
+#          /etc/duatic/unresolved-rosdep.txt as "link: <package>", a failed install for the gate.
 # refresh  maps the packages the configured source publishes now, for duatic-deps in a container.
 #
 # A Debian name maps to the key it was built from: ros-<distro>-<name> to the ROS package <name>,
@@ -53,6 +56,8 @@ MAPPING=/etc/duatic/archive-rosdep.yaml
 # One "<package> <version>" per line.
 VERSIONS=/etc/duatic/archive-versions.txt
 PIN=/etc/apt/preferences.d/duatic-archive
+# What duatic-rosdep-install records and duatic-deps --gate fails on.
+UNRESOLVED=/etc/duatic/unresolved-rosdep.txt
 # Above the default 500 of every other suite, so the first channel wins over a higher version
 # elsewhere.
 PREFER=/etc/apt/preferences.d/duatic-archive-channel
@@ -126,8 +131,19 @@ add() {
     echo "duatic_archive: ${URL} ${suites[*]}."
 }
 
+# misses <package> <library path>: print what the shared libraries of an installed package miss,
+# undefined symbols and libraries not found.
+misses() {
+    local lib
+    while read -r lib; do
+        [[ "$lib" =~ /lib[^/]*\.so(\.[0-9]+)*$ && -f "$lib" && ! -L "$lib" ]] || continue
+        LD_LIBRARY_PATH="$2" ldd -r "$lib" 2>&1 | grep -E 'undefined symbol|not found' || true
+    done < <(dpkg -L "$1")
+}
+
 # record: see the header.
 record() {
+    local deb missed ldpath
     # The installed packages whose deb a mapping entry names between brackets.
     dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' |
         awk 'NR == FNR { deb[$0]; next } $1 == "ii" && ($2 in deb) { print $2, $3 }' \
@@ -135,6 +151,15 @@ record() {
     rm -f "$PIN"
     echo "duatic_archive: installed from the archive:"
     cat "$VERSIONS"
+    # The library path of the ROS installation, which the archive's libraries are found on.
+    ldpath=$(env -i bash -c ". /opt/ros/${ROS_DISTRO}/setup.bash && printf %s \"\$LD_LIBRARY_PATH\"")
+    while read -r deb _; do
+        missed=$(misses "$deb" "$ldpath")
+        [[ -n "$missed" ]] || continue
+        echo "link: $deb" >>"$UNRESOLVED"
+        echo "duatic_archive: ${deb} does not link against the installed packages:" >&2
+        c++filt <<<"$missed" | sed 's/^/  /' >&2
+    done <"$VERSIONS"
 }
 
 case "${1:-}" in
