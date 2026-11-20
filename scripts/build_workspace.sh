@@ -41,7 +41,8 @@ Flags:
   --cachebust STR        forces a fresh source clone and a fresh apt-get update/upgrade
                          in ci/dev, and a new ci key                    (default: IMAGE_DATE)
   --version VERSION      RELEASE build (--target runtime or dev,runtime): builds everything
-                         from scratch, never reusing a ci image; tags each image
+                         from scratch, never reusing a ci image, with Duatic packages from
+                         the stable channel of the apt archive only; tags each image
                          :<distro>-VERSION instead of the nightly tags and moves its
                          :<distro> to it, refuses to build if a VERSION tag already exists
                          (release tags are immutable), and builds dev only once runtime
@@ -84,13 +85,16 @@ Targets:
 
 The repository set is resolved first: every branch the repos.list names, recursively, is pinned to
 its commit, and only the packages the checkout's package.xml files depend on, recursively, and
-the repositories carrying them are kept (scripts/expand_repos.py). The ci image is keyed on
+the repositories carrying them are kept (scripts/expand_repos.py). rosdep installs every other
+dependency, Duatic packages from the Duatic apt archive (https://apt.duatic.com): from its
+nightly channel, else from stable, or from stable alone for a release. A package kept that the
+archive also publishes on one of those channels is an error. The ci image is keyed on
 everything it is built from: the cachebust day, the factory files it reads, the ros2-base
-digest, the distro, the architecture, the pinned upstream repositories and the checkout's
-package.xml, Aptfile and requirements.txt files. When an image with that key is published,
-every target reuses it instead of building it. A release never reuses one. A ci image in which a
-dependency failed to install is not published, so the next run builds it again; keys rosdep
-cannot resolve do not stop the publish.
+digest, the distro, the architecture, the state of the archive channels it reads, the pinned
+upstream repositories and the checkout's package.xml, Aptfile and requirements.txt files. When
+an image with that key is published, every target reuses it instead of building it. A release
+never reuses one. A ci image in which a dependency failed to install is not published, so the
+next run builds it again; keys rosdep cannot resolve do not stop the publish.
 
 ensure_workspace_build() compiles the checkout on top of ci once per script invocation, at
 /opt/duatic/ws (Dockerfile target `workspace`), into BuildKit's cache only: it is an internal
@@ -280,7 +284,7 @@ setup_cache() {
 }
 
 # The files a resolved repository set consists of (see scripts/expand_repos.py).
-LOCK_FILES=(upstream.repos sources.lock.repos sources.repos unused_packages.txt)
+LOCK_FILES=(upstream.repos sources.lock.repos sources.repos unused_packages.txt built_packages.txt)
 
 # Pin the repository set (Dockerfile target lock, see its resolve stage), or take the one --lock
 # names, and pass it to every later build as the lock context, so they all build exactly the
@@ -316,6 +320,54 @@ resolve_lock() {
     SOURCE_ARGS+=(--build-context "lock=${LOCK_DIR}")
 }
 
+# The Duatic apt archive's channels this build reads, stable alone for a release, and the state of
+# their suites for the image's Ubuntu release: per suite, the digest of the name and version of
+# every package this distro and architecture can install from it (ros-<distro>-* and the system
+# packages), so a publish for another distro changes nothing. It goes into the ci key and the build
+# arg that reruns the dependency installs of ci and dev. A package the repository set builds from
+# source that the archive also publishes is an error: its repository must leave repos.list. Sets
+# ARCHIVE_STATE and ARCHIVE_ARGS.
+resolve_archive() {
+    local channels=(nightly stable) codename channel digest overlap
+    if [[ -n "$VERSION_FLAG" ]]; then
+        channels=(stable)
+    fi
+    # The Ubuntu release docker/base.Dockerfile builds each distro on.
+    case "$ROS_DISTRO" in
+        humble) codename=jammy ;;
+        jazzy | kilted) codename=noble ;;
+        lyrical | rolling) codename=resolute ;;
+        *)
+            echo "Error: no Ubuntu release known for ${ROS_DISTRO}, so no apt archive suite." >&2
+            exit 1
+            ;;
+    esac
+    ARCHIVE_STATE=""
+    for channel in "${channels[@]}"; do
+        curl -fsSL \
+            "https://apt.duatic.com/dists/${codename}-${channel}/main/binary-${ARCH}/Packages.gz" |
+            gzip -dc | awk -v ros="ros-${ROS_DISTRO}-" '/^Package: / { p = $2 }
+                /^Version: / && (index(p, ros) == 1 || p !~ /^ros-/) { print p, $2 }' |
+            LC_ALL=C sort >"${LOCK_DIR}/archive-${channel}.txt"
+        digest=$(sha256sum <"${LOCK_DIR}/archive-${channel}.txt")
+        ARCHIVE_STATE+="${ARCHIVE_STATE:+ }${codename}-${channel}=${digest%% *}"
+    done
+    echo ">>> Duatic apt archive: ${ARCHIVE_STATE}"
+    # Each deb as the package it was built from, as scripts/duatic_archive.sh maps it.
+    overlap=$(awk -v ros="ros-${ROS_DISTRO}-" -v built="${LOCK_DIR}/built_packages.txt" '
+        FILENAME != built { p = $1; sub("^" ros, "", p); gsub("-", "_", p); deb[p]; next }
+        $1 in deb { print "  " $1 " (repository " $2 ")" }' \
+        "${LOCK_DIR}"/archive-*.txt "${LOCK_DIR}/built_packages.txt")
+    if [[ -n "$overlap" ]]; then
+        echo "Error: built from source by repos.list, and published in the apt archive's" \
+            "${channels[*]} channels. Remove their repositories from repos.list:" >&2
+        echo "$overlap" >&2
+        exit 1
+    fi
+    ARCHIVE_ARGS=(--build-arg "DUATIC_ARCHIVE_CHANNELS=${channels[*]}"
+                  --build-arg "DUATIC_ARCHIVE_STATE=${ARCHIVE_STATE}")
+}
+
 # Print the ci key: a digest of everything the ci image is built from (see --help).
 ci_key() {
     # The content of the factory files the ci stage reads, so a checkout and a downloaded action
@@ -329,7 +381,7 @@ ci_key() {
         --format '{{.Manifest.Digest}}')
     {
         printf '%s\n' "cachebust ${CACHEBUST}" "factory ${factory}" "base ${base}" \
-            "distro ${ROS_DISTRO}" "arch ${ARCH}"
+            "distro ${ROS_DISTRO}" "arch ${ARCH}" "archive ${ARCHIVE_STATE}"
         cat "${LOCK_DIR}/upstream.repos"
         "${SCRIPT_DIR}/duatic_deps.sh" --list "$SOURCE_DIR"
     } | sha256sum | cut -c1-16
@@ -346,7 +398,7 @@ ensure_ci() {
     [[ -n "$CI_OK" ]] && return 0
     local output=(--output type=cacheonly) recorded="${LOCK_DIR}/ci-recorded"
     local build=(docker buildx build -f "$DOCKERFILE" "${PARENT_ARGS[@]}" "${SOURCE_ARGS[@]}"
-                 --build-arg "CACHEBUST=${CACHEBUST}" "${PARALLEL_ARGS[@]}"
+                 --build-arg "CACHEBUST=${CACHEBUST}" "${ARCHIVE_ARGS[@]}" "${PARALLEL_ARGS[@]}"
                  "${SECRET_ARG[@]}")
     CI_OK=false
     if [[ -n "$VERSION_FLAG" ]]; then
@@ -415,6 +467,7 @@ ensure_workspace_build() {
         "${PARENT_ARGS[@]}" \
         "${SOURCE_ARGS[@]}" \
         --build-arg "CACHEBUST=${CACHEBUST}" \
+        "${ARCHIVE_ARGS[@]}" \
         "${PARALLEL_ARGS[@]}" \
         "${SECRET_ARG[@]}" \
         --output type=cacheonly \
@@ -483,6 +536,7 @@ build_dev() {
         --build-arg "CACHEBUST=${CACHEBUST}" \
         --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
         --build-arg "IMAGE_VERSION=${VERSION_FLAG:-$IMAGE_DATE}" \
+        "${ARCHIVE_ARGS[@]}" \
         "${PARALLEL_ARGS[@]}" \
         "${SECRET_ARG[@]}" \
         "${OUTPUT[@]}" \
@@ -517,6 +571,7 @@ build_runtime() {
         "${PARENT_ARGS[@]}" \
         "${SOURCE_ARGS[@]}" \
         --build-arg "CACHEBUST=${CACHEBUST}" \
+        "${ARCHIVE_ARGS[@]}" \
         "${PARALLEL_ARGS[@]}" \
         "${SECRET_ARG[@]}" \
         --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
@@ -550,6 +605,7 @@ if [[ -n "$VERSION_FLAG" ]]; then
 fi
 
 resolve_lock
+resolve_archive
 if [[ -n "$RESOLVE_TO_FLAG" ]]; then
     mkdir -p "$RESOLVE_TO_FLAG"
     cp "${LOCK_FILES[@]/#/${LOCK_DIR}/}" "$RESOLVE_TO_FLAG"
