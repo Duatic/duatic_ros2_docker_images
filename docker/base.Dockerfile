@@ -38,9 +38,9 @@
 ARG ROS_DISTRO=jazzy
 
 # One literal FROM per distro, pinned by digest so Dependabot can bump them.
-FROM docker.io/library/ros:humble-ros-base@sha256:d9f14e84747bea639a65e00cf871d2c68ae55385d2acf6239614de0cadb41dcc AS ros-humble
-FROM docker.io/library/ros:jazzy-ros-base@sha256:00b8d47a6e6384a2834e3d01fa87ae767876543baa574f2d64a75c04ea33c698 AS ros-jazzy
-FROM docker.io/library/ros:kilted-ros-base@sha256:e03695c26eef219f86068a6aa6151fc7ce58b7afd677fc4f82df748dc0acc4a1 AS ros-kilted
+FROM docker.io/library/ros:humble-ros-base@sha256:a18afd4a42ad603579d03b9012385dfeaf2e848423f0a6c41699766e7849c86c AS ros-humble
+FROM docker.io/library/ros:jazzy-ros-base@sha256:5147d3ae250ce754afd399f6bfec15b33dd4e473ca357e30432a3182031bfad6 AS ros-jazzy
+FROM docker.io/library/ros:kilted-ros-base@sha256:8141e08c233f76e0f047e166c1394b0eeeedcd894e5f6fc27008ed61e1643f66 AS ros-kilted
 FROM docker.io/library/ros:lyrical-ros-base@sha256:c69a7a39142b0a19c8cc5e80a35e9087e2ae46080dfa0a59961ff72287fdc5f6 AS ros-lyrical
 FROM docker.io/library/ros:rolling-ros-base@sha256:50c2d0ace849ef6f978c3395ad94f026c4c37e389c713ab714b99385982363c9 AS ros-rolling
 
