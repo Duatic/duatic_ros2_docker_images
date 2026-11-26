@@ -68,5 +68,5 @@ s/^/<6>/
 # command closes its output.
 exec "${cmd[@]}" "$@" > >(
     trap '' INT TERM HUP
-    exec tee >(sed -u -E "$PRIORITY_PREFIX" | logger --prio-prefix -t "$name")
+    exec tee -i >(sed -u -E "$PRIORITY_PREFIX" | logger --prio-prefix -t "$name")
 ) 2>&1
