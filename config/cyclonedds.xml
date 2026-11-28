@@ -14,5 +14,9 @@
         <Peer Address="${CYCLONEDDS_PEER:-localhost}"/>
       </Peers>
     </Discovery>
+    <Internal>
+      <!-- Requested, not required: the host's net.core.rmem_max caps it -->
+      <SocketReceiveBufferSize max="8MB"/>
+    </Internal>
   </Domain>
 </CycloneDDS>
