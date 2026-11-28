@@ -46,6 +46,8 @@ Writes, ready for `vcs import`:
                              names: an editable, branch-tracking manifest
   DIR/unused_packages.txt    one line per package of upstream.repos that is not built: its
                              directory relative to the directory upstream.repos is imported into
+  DIR/built_packages.txt     one line per package of upstream.repos that is built: its name and
+                             the key of the repository carrying it
 
 --locked takes LOCK_FILE, the sources.lock.repos of an earlier build, to reproduce it: nothing is
 expanded or pinned again, the root (matched by URL) is left out of upstream.repos, and both
@@ -65,6 +67,7 @@ import yaml
 
 MANIFEST = "package.xml"
 UNUSED = "unused_packages.txt"
+BUILT = "built_packages.txt"
 # Tries per git command that reaches the network, and the wait before the first retry, in seconds.
 NETWORK_ATTEMPTS = 3
 RETRY_DELAY_S = 5
@@ -301,6 +304,16 @@ def write_unused(path, found, provides):
         f.writelines(f"{d}\n" for d in unused)
 
 
+def write_built(path, found):
+    """Write the packages built, one ``<package> <repository key>`` line each.
+
+    :param path: the file to write, overwritten if it exists.
+    :param found: the packages built, as :func:`needed` returns them.
+    """
+    with open(path, "w") as f:
+        f.writelines(f"{name} {key}\n" for name, key in sorted(found.items()))
+
+
 def write(path, repos):
     """Write a repositories mapping as a repos file.
 
@@ -312,7 +325,7 @@ def write(path, repos):
 
 
 def main():
-    """Write the three repos files and unused_packages.txt.
+    """Write the three repos files, unused_packages.txt and built_packages.txt.
 
     :raises SystemExit: with the first conflict found.
     """
@@ -341,6 +354,7 @@ def main():
         write(os.path.join(args.out, "sources.lock.repos"), repos)
         write(os.path.join(args.out, "sources.repos"), repos)
         write_unused(os.path.join(args.out, UNUSED), found, provides)
+        write_built(os.path.join(args.out, BUILT), found)
         return
 
     listed = next((n for n in lists if os.path.exists(os.path.join(args.checkout, n))), None)
@@ -360,6 +374,7 @@ def main():
     )
     write(os.path.join(args.out, "sources.repos"), {name: {**root, "version": branch}, **merged})
     write_unused(os.path.join(args.out, UNUSED), found, provides)
+    write_built(os.path.join(args.out, BUILT), found)
 
 
 if __name__ == "__main__":

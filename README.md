@@ -138,15 +138,18 @@ ros2-base ─► ci (dependencies + upstream repositories compiled)
 ```
 
 `ci` is keyed on everything it is built from: the day (in Zurich), the factory files it reads,
-the `ros2-base` digest, the distro, the architecture, the upstream repositories pinned to their
-commits, and the repository's own `package.xml`, `Aptfile` and `requirements.txt` files. `build_workspace.sh`
+the `ros2-base` digest, the distro, the architecture, the state of the
+[apt archive](#duatic-packages-from-the-apt-archive) channels it reads (the versions of the
+distro's packages for the architecture), the upstream repositories pinned to their commits, and
+the repository's own `package.xml`, `Aptfile` and `requirements.txt` files. `build_workspace.sh`
 publishes it under that key and reuses a published one instead of building it again, so a
 day's CI runs, pushes and nightly build it at most once per distro and architecture, and a new commit on any
-upstream branch is picked up by the next run. A `ci` image in which a dependency failed to
-install (an `<installer>: <what>` line in `/etc/duatic/unresolved-{rosdep,deps}.txt`, usually a
-mirror outage) is not published: the run still builds on it, so CI's gate reports the failure,
-and the next run builds it again. One whose only gaps are keys rosdep cannot resolve is
-published. Releases never reuse it: they build everything
+upstream branch, or a new package in the archive, is picked up by the next run. A `ci` image in
+which a dependency failed to install (an `<installer>: <what>` line in
+`/etc/duatic/unresolved-{rosdep,deps}.txt`, usually a mirror outage) is not published: the run
+still builds on it, so CI's gate reports the failure, and the next run builds it again. One whose
+only gaps are keys rosdep cannot resolve is published. Releases never reuse it: they build
+everything
 from scratch. `dev` and `runtime` share one compile of the repository: the internal,
 never-published `workspace` stage compiles it once on top of `ci`.
 
@@ -189,7 +192,46 @@ calling repository depends on, directly or through another package built (any `*
 counts), are built and have their dependencies installed, and only the repositories carrying one
 of them are cloned. Every other package is removed from the image's sources after the clone (the
 `sources.repos` manifest still names whole repositories), so a repository must declare every
-package it needs from another Duatic repository in its `package.xml`.
+package it needs from another Duatic repository in its `package.xml`. A dependency no list
+provides is left to rosdep. A package built this way that the
+[apt archive](#duatic-packages-from-the-apt-archive) also publishes, on a channel the build
+reads, stops the build before anything else runs: remove its repository from the list, and
+rosdep installs the deb instead.
+
+#### Duatic packages from the apt archive
+
+rosdep installs Duatic packages from the Duatic apt archive, <https://apt.duatic.com>, like any
+other dependency: each package the archive publishes for the distro is a rosdep key ahead of the
+public index. The ROS package `duatic_helpers` is the deb `ros-<distro>-duatic-helpers`, and a
+system package (`<duatic_package_kind>system</duatic_package_kind>`) is the deb of its name with
+every `_` as `-`.
+
+A release reads the archive's `stable` channel, every other build `nightly` and `stable`.
+apt takes a package from `nightly` whenever `nightly` holds it, whatever version `stable` holds,
+and from `stable` otherwise: a patch release of an older version never replaces the build of
+`main`.
+
+The archive's packages depend on each other without versions, so a channel can hold one built
+against another version of a dependency than the one it serves. `ci`, `dev` and `duatic-deps`
+run `ldd -r` over the shared libraries of every package installed from the archive, and record
+one that misses a symbol or a library as `link: <package>` in
+`/etc/duatic/unresolved-rosdep.txt`, a failed install like any other. It catches a removed or
+renamed symbol, not a changed type behind the same one.
+
+Every image keeps the archive as an apt source, on the channels it was built from, and
+`/etc/duatic/archive-rosdep.yaml`, the rosdep keys of every package the archive publishes for the
+distro. In a container, `duatic-deps` maps what the archive publishes at that moment and installs
+the Duatic dependencies the image lacks, from the image's channels. It leaves the Duatic packages
+already installed at their versions. Their dependencies on each other carry no version, so a new
+package built against a newer version of one of them installs, and can still fail to link or
+run against the older one: then install that dependency's newer version by hand.
+
+Each image records the versions it installed from the archive in
+`/etc/duatic/archive-versions.txt`. A `dev` image with the prebuilt workspace installs exactly the
+versions in the workspace's `archive-versions.txt`, the ones it was compiled against. The
+archive's signing key is `config/duatic-archive.gpg` (fingerprint
+`771C BC98 2764 A2BC B858 F1AE 6FB3 8A5C DC94 256C`), installed in every image at
+`/etc/apt/keyrings/duatic-archive.gpg`: a new key ships with a factory release.
 
 Dependencies rosdep cannot resolve are declared in `requirements.txt` (pip) and `Aptfile` (apt)
 files at any depth of the workspace, which `duatic-install-extra-deps` installs after rosdep.
@@ -204,7 +246,8 @@ uninstallable manifests to `/etc/duatic/unresolved-deps.txt`, without blocking t
 of the build with every entry, the repository itself included, pinned to a commit. Hand it to
 `vcs import`, or rebuild from it with a checkout of the repository at the commit it names:
 `build_workspace.sh --source <that checkout> --sources-lock <the file>`. For a release, the
-caller's `release/<distro>/<version>` tag is that commit.
+caller's `release/<distro>/<version>` tag is that commit. Packages from the apt archive are not
+part of it: `dpkg -l` lists them, and a rebuild installs the newest the archive holds then.
 
 `dev` also carries `/etc/duatic/sources.repos`, the same set with each `version:` left on the
 branch it was checked out on, as a starting point for an editable manifest.
@@ -297,7 +340,8 @@ workflow, since GitHub bills hosted runner minutes for private repositories.
 
 `reusable_release_image.yml` (inputs `ros_distro`, `version`) builds `runtime` and `dev` through
 `reusable_build_image.yml` from the revision the calling repository runs on, from scratch: it pins
-the upstream repositories anew and never reuses a published `ci` image. It refuses to run if
+the upstream repositories anew, installs Duatic packages from the archive's `stable` channel
+only, and never reuses a published `ci` image. It refuses to run if
 `<name>:<distro>-<version>` or `<name>-dev:<distro>-<version>` already exists, builds `dev` only
 once `runtime` passed its strict gate, and tags both multi-arch images and moves their `:<distro>`
 only when every architecture built both: a failed leg leaves the version unused. It then tags the
