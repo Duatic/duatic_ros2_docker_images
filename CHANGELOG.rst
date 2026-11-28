@@ -2,6 +2,12 @@
 Changelog
 ^^^^^^^^^
 
+2.2.0 (2026-11-28)
+------------------
+* feat: copy ros2 launch and ros2 run output to the host journal (#52)
+* fix(deps): bump library/ros from `d9f14e8` to `a18afd4` in /docker (#59)
+* fix(workspace): record and do not publish failed dependency installs (#57)
+
 2.1.2 (2026-11-19)
 ------------------
 * ci(images): build base and nightly images for jazzy only (#56)
