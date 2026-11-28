@@ -58,6 +58,8 @@ derived images set `DUATIC_IMAGE_NAME`.
 
 DDS defaults to CycloneDDS on loopback (`/etc/cyclonedds.xml`). Set `CYCLONEDDS_IFACE` and
 `CYCLONEDDS_PEER` to use another interface.
+It requests an 8 MB socket receive buffer, which the host's `net.core.rmem_max` caps. Raise that
+on hosts that receive large messages, such as camera images.
 
 #### Python packages
 
